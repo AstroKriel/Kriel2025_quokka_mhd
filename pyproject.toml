@@ -1,7 +1,7 @@
 [project]
 name = "kriel-2025-quokka-mhd"
 version = "0.1.0"
-description = "Add your description here"
+description = "magnetising quokka code paper"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
