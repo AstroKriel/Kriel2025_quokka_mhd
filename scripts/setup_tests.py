@@ -4,9 +4,9 @@ from pathlib import Path
 from jormi.ww_io import io_manager, shell_manager, json_files
 from jormi.ww_jobs import pbs_job_manager
 
-PAPER_DIR = Path(__file__).resolve().parent.parent
 # QUOKKA_DIR = Path("/Users/necoturb/Documents/Codes/quokka") # macOS
 QUOKKA_DIR = Path("/g/data1b/jh2/nk7952/quokka/") # gadi
+DATA_DIR = Path("/scratch/jh2/nk7952/quokka")
 
 EXECUTE_JOB = True
 QUOKKA_PROBLEM_SET = {
@@ -202,7 +202,7 @@ def setup_problem(
   domain_label = get_domain_label(domain_params)
   sim_label    = f"{scheme_label}_{domain_label}"
   ## target folder
-  target_problem_dir = PAPER_DIR / "sims" / scaling_mode / quokka_build / problem_name / scheme_label / domain_label
+  target_problem_dir = DATA_DIR / "sims" / scaling_mode / quokka_build / problem_name / scheme_label / domain_label
   io_manager.init_directory(target_problem_dir)
   ## save generated parameter files
   json_files.save_dict_to_json_file(
@@ -249,8 +249,8 @@ def setup_problem(
     wall_time_hours    = 5,
     storage_group_name = "jh2",
     email_address      = "neco.kriel@anu.edu.au",
-    email_on_start     = False,
-    email_on_finish    = False,
+    email_on_start     = True,
+    email_on_finish    = True,
     verbose            = True,
   )
   if EXECUTE_JOB:
