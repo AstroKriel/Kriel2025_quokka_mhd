@@ -1,10 +1,12 @@
-from typing import Any
+import math
+from typing import Dict, Any, Union
 from pathlib import Path
 from jormi.ww_io import io_manager, shell_manager
 from jormi.ww_jobs import pbs_job_manager
 
 QUOKKA_DIR = Path("/Users/necoturb/Documents/Codes/quokka") # macOS
 # QUOKKA_DIR = Path("/g/data1b/jh2/nk7952/quokka/") # gadi
+
 PAPER_DIR = Path(__file__).resolve().parent.parent
 EXECUTE_JOB = False
 
@@ -31,16 +33,76 @@ QUOKKA_PROBLEM_SET = {
   },
 }
 
-def get_input_params(nres_per_dim: int) -> dict:
+## WEAK SCALING
+## > work per rank stays the same, but total work increases
+## - fix `blocks_per_box_dim`
+## - fix `boxes_per_rank`
+## - increase `blocks_per_sim_dim`
+## - where `cells_per_block_dim` is fixed (to keep things fair)
+
+## STRONG SCALING
+## > total work stays the same, but the work per rank decreases until communication overhead bites
+## - fix `blocks_per_sim_dim`
+## - fix `blocks_per_box_dim`
+## - decrease `boxes_per_rank` (to increase number of workers)
+
+def is_power_of_two(value: int) -> bool:
+  # return value > 0 and (value & (value - 1)) == 0
+  exponent = math.log2(value)
+  return abs(exponent - round(exponent)) < 1e-7 # single precision
+
+def configure_uniform_grid(
+    *,
+    cells_per_block_dim : int, # quantisation of work (AMReX blocking-factor)
+    blocks_per_sim_dim  : int, # domain decomposition
+    blocks_per_box_dim  : int, # defines the amount of communication within rank
+    boxes_per_rank      : int, # defines the amount of work taken on by each rank
+  ) -> Dict[str, Union[int, str]]:
+  if not is_power_of_two(cells_per_block_dim):
+    raise ValueError("`cells_per_block_dim` must be a power of 2.")
+  if not isinstance(blocks_per_sim_dim, int) or blocks_per_sim_dim < 1:
+    raise ValueError("`blocks_per_sim_dim` must be a positive integer.")
+  if not isinstance(blocks_per_box_dim, int) or blocks_per_box_dim < 1:
+    raise ValueError("`blocks_per_box_dim` must be a positive integer.")
+  if not isinstance(boxes_per_rank, int) or boxes_per_rank < 1:
+    raise ValueError("`boxes_per_rank` must be a positive integer.")
+  if blocks_per_sim_dim % blocks_per_box_dim != 0:
+    raise ValueError(f"`blocks_per_sim_dim = {blocks_per_sim_dim}` must be divisible by `blocks_per_box_dim = {blocks_per_box_dim}` for exact tiling.")
+  boxes_per_sim_dim = blocks_per_sim_dim // blocks_per_box_dim
+  total_boxes       = boxes_per_sim_dim ** 3
+  if total_boxes % boxes_per_rank != 0:
+    raise ValueError(f"`total_boxes = {total_boxes}` is not divisible by your chosen `boxes_per_rank = {boxes_per_rank}`.")
+  cells_per_sim_dim    = cells_per_block_dim * blocks_per_sim_dim
+  cells_per_box_dim    = cells_per_block_dim * blocks_per_box_dim
+  total_cells_per_box  = cells_per_box_dim ** 3
+  total_cells_per_rank = boxes_per_rank * total_cells_per_box
+  total_mpi_ranks      = total_boxes // boxes_per_rank
+  return {
+    ## inputs parameters
+    "amr.n_cell"            : f"{cells_per_sim_dim} {cells_per_sim_dim} {cells_per_sim_dim}",
+    "amr.max_grid_size"     : cells_per_box_dim,
+    "amr.blocking_factor_x" : cells_per_block_dim,
+    "amr.blocking_factor_y" : cells_per_block_dim,
+    "amr.blocking_factor_z" : cells_per_block_dim,
+    ## useful bookkeeping
+    "boxes_per_sim_dim"     : boxes_per_sim_dim,
+    "total_boxes"           : total_boxes,
+    "boxes_per_rank"        : boxes_per_rank,
+    "total_mpi_ranks"       : total_mpi_ranks,
+    "box_cells_per_dim"     : cells_per_box_dim,
+    "total_cells_per_rank"  : total_cells_per_rank,
+  }
+
+def get_input_params(cells_per_dim: int) -> dict:
   return {
     "plotfile_interval"            : 10,
     "checkpoint_interval"          : -1,
-    "amr.n_cell"                   : f"{nres_per_dim} {nres_per_dim} {nres_per_dim}",
+    "amr.n_cell"                   : f"{cells_per_dim} {cells_per_dim} {cells_per_dim}",
     "amr.max_level"                : 0,
-    "amr.max_grid_size"            : nres_per_dim,
-    "amr.blocking_factor_x"        : nres_per_dim,
-    "amr.blocking_factor_y"        : nres_per_dim,
-    "amr.blocking_factor_z"        : nres_per_dim,
+    "amr.max_grid_size"            : cells_per_dim,
+    "amr.blocking_factor_x"        : cells_per_dim,
+    "amr.blocking_factor_y"        : cells_per_dim,
+    "amr.blocking_factor_z"        : cells_per_dim,
     "cfl"                          : 0.3,
     "hydro.use_dual_energy"        : 0,
     "hydro.rk_integrator_order"    : 2, # 1 or 2
@@ -78,8 +140,8 @@ def adjust_input_file(
 def setup_problem(
     build_name      : str,
     problem_name    : str,
-    nres_per_dim    : int,
-    num_procs       : int,
+    cells_per_dim    : int,
+    procs       : int,
     queued_job_tags : list[str]
   ):
   problem_files = QUOKKA_PROBLEM_SET[problem_name]
@@ -96,7 +158,7 @@ def setup_problem(
   if not source_input_file_path.exists():
     raise FileNotFoundError(f"Error: Parameter file could not be found under: {source_input_file_path}")
   ## collect simulation parameter details
-  setup_params = get_input_params(nres_per_dim)
+  setup_params = get_input_params(cells_per_dim)
   setup_label = get_setup_label(setup_params)
   ## target folder and files
   target_problem_dir = PAPER_DIR / "sims" / build_name / problem_name / setup_label
@@ -125,11 +187,11 @@ def setup_problem(
     system_name        = "gadi",
     directory          = target_problem_dir,
     file_name          = f"job.sh",
-    command            = f". ~/modules_quokka\nmpirun -np {num_procs} {exe_file_name} {input_file_name}",
+    command            = f". ~/modules_quokka\nmpirun -np {procs} {exe_file_name} {input_file_name}",
     tag_name           = job_tag,
     queue_name         = "normal", # "rsaa",
     compute_group_name = "jh2", # "mk27",
-    num_procs          = num_procs,
+    procs          = procs,
     wall_time_hours    = 2,
     storage_group_name = "jh2",
     email_address      = "neco.kriel@anu.edu.au",
@@ -154,12 +216,12 @@ def main():
     for _, job_tag in queued_jobs
   ]
   for nres_exponent in range(3, 7):
-    nres_per_dim = 2**nres_exponent
+    cells_per_dim = 2**nres_exponent
     setup_problem(
       build_name      = build_name,
       problem_name    = problem_name,
-      nres_per_dim    = nres_per_dim,
-      num_procs       = 8,
+      cells_per_dim    = cells_per_dim,
+      procs       = 8,
       queued_job_tags = queued_job_tags,
     )
     print(" ")
