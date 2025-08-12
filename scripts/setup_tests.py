@@ -1,7 +1,7 @@
 import math
 from typing import Any, Union
 from pathlib import Path
-from jormi.ww_io import io_manager, shell_manager
+from jormi.ww_io import io_manager, shell_manager, json_files
 from jormi.ww_jobs import pbs_job_manager
 
 PAPER_DIR = Path(__file__).resolve().parent.parent
@@ -39,11 +39,13 @@ def is_power_of_two(value: int) -> bool:
 
 def get_domain_params(
     *,
-    cells_per_block_dim : int, # quantisation of work (AMReX blocking-factor)
-    blocks_per_sim_dim  : int, # domain decomposition
-    blocks_per_box_dim  : int, # defines the amount of communication within rank
-    boxes_per_rank      : int, # defines the amount of work taken on by each rank
-  ) -> dict[str, Union[int, str]]:
+    cells_per_block_dim   : int, # quantisation of work (AMReX blocking-factor)
+    blocks_per_sim_dim    : int, # domain decomposition
+    blocks_per_box_dim    : int, # amount of communication within rank
+    boxes_per_rank        : int, # amount of work taken on by each rank
+    num_procs_per_node    : int, # resources available per node
+    round_to_nearest_node : bool = False, # allow idle ranks to fill full nodes
+  ) -> dict[str, Union[int, float, str]]:
   if not is_power_of_two(cells_per_block_dim):
     raise ValueError("`cells_per_block_dim` must be a power of 2.")
   if not isinstance(blocks_per_sim_dim, int) or blocks_per_sim_dim < 1:
@@ -52,6 +54,8 @@ def get_domain_params(
     raise ValueError("`blocks_per_box_dim` must be a positive integer.")
   if not isinstance(boxes_per_rank, int) or boxes_per_rank < 1:
     raise ValueError("`boxes_per_rank` must be a positive integer.")
+  if not isinstance(num_procs_per_node, int) or num_procs_per_node < 1:
+    raise ValueError("`blocks_per_sim_dim` must be a positive integer.")
   if blocks_per_sim_dim % blocks_per_box_dim != 0:
     raise ValueError(
       f"`blocks_per_sim_dim = {blocks_per_sim_dim}` is not divisible by "
@@ -68,7 +72,27 @@ def get_domain_params(
   cells_per_box_dim    = cells_per_block_dim * blocks_per_box_dim
   total_cells_per_box  = cells_per_box_dim ** 3
   total_cells_per_rank = boxes_per_rank * total_cells_per_box
-  total_mpi_ranks      = total_boxes // boxes_per_rank
+  mpi_ranks_w_work     = total_boxes // boxes_per_rank
+  if mpi_ranks_w_work <= num_procs_per_node:
+    ## when using less than a single node
+    mpi_ranks_requested = mpi_ranks_w_work
+  else:
+    ## multi-node jobs should use whole nodes
+    if mpi_ranks_w_work % num_procs_per_node == 0:
+      ## already using entirity of nodes
+      mpi_ranks_requested = mpi_ranks_w_work
+    else:
+      ## when using a partial node
+      if not round_to_nearest_node:
+        raise ValueError(
+          "Violated use of full-node: "
+          f"`mpi_ranks_w_work={mpi_ranks_w_work}` is not a multiple of {num_procs_per_node}."
+        )
+      ## round up to a whole node (will lead to a few idle ranks)
+      mpi_ranks_requested = math.ceil(mpi_ranks_w_work / num_procs_per_node) * num_procs_per_node
+  mpi_ranks_idle = mpi_ranks_requested - mpi_ranks_w_work
+  nodes_used = math.ceil(mpi_ranks_requested / num_procs_per_node)
+  mpi_rank_utilisation = 100 * mpi_ranks_w_work / mpi_ranks_requested
   return {
     ## AMReX params
     "amr.n_cell"            : f"{cells_per_sim_dim} {cells_per_sim_dim} {cells_per_sim_dim}",
@@ -89,7 +113,12 @@ def get_domain_params(
     ## workload
     "total_cells_per_box"   : total_cells_per_box,
     "total_cells_per_rank"  : total_cells_per_rank,
-    "total_mpi_ranks"       : total_mpi_ranks,
+    "mpi_ranks_requested"   : mpi_ranks_requested,
+    "mpi_ranks_w_work"      : mpi_ranks_w_work,
+    "mpi_ranks_idle"        : mpi_ranks_idle,
+    "nodes_used"            : nodes_used,
+    "mpi_rank_utilisation"  : mpi_rank_utilisation,
+    "num_procs_per_node"    : num_procs_per_node,
   }
 
 def get_sim_params(domain_params: dict[str, Any]) -> dict[str, Any]:
@@ -125,8 +154,8 @@ def get_domain_label(domain_params: dict[str, Any]) -> str:
   cells_per_box_dim   = "Nbo={}".format(domain_params["cells_per_box_dim"])
   cells_per_block_dim = "Nbl={}".format(domain_params["cells_per_block_dim"])
   boxes_per_rank      = "bopr={}".format(domain_params["boxes_per_rank"])
-  total_mpi_ranks     = "mpir={}".format(domain_params["total_mpi_ranks"])
-  return "_".join([ cells_per_sim_dim, cells_per_box_dim, cells_per_block_dim, boxes_per_rank, total_mpi_ranks ])
+  mpi_ranks_requested = "mpir={}".format(domain_params["mpi_ranks_requested"])
+  return "_".join([ cells_per_sim_dim, cells_per_box_dim, cells_per_block_dim, boxes_per_rank, mpi_ranks_requested ])
 
 def adjust_input_file(
     file_path    : Path,
@@ -167,13 +196,24 @@ def setup_problem(
   if not source_input_file_path.exists():
     raise FileNotFoundError(f"Error: Parameter file could not be found under: {source_input_file_path}")
   ## collect simulation parameter details
-  sim_params = get_sim_params(domain_params)
+  sim_params   = get_sim_params(domain_params)
   scheme_label = get_scheme_label(sim_params)
   domain_label = get_domain_label(domain_params)
-  sim_label = f"{scheme_label}_{domain_label}"
+  sim_label    = f"{scheme_label}_{domain_label}"
   ## target folder
   target_problem_dir = PAPER_DIR / "sims" / scaling_mode / quokka_build / problem_name / scheme_label / domain_label
   io_manager.init_directory(target_problem_dir)
+  ## save generated parameter files
+  json_files.save_dict_to_json_file(
+    file_path  = target_problem_dir / "domain_params.json",
+    input_dict = domain_params,
+    overwrite  = True
+  )
+  json_files.save_dict_to_json_file(
+    file_path  = target_problem_dir / "sim_params.json",
+    input_dict = sim_params,
+    overwrite  = True
+  )
   ## copy problem executable and input files over
   io_manager.copy_file(
     directory_from = source_exe_file_dir,
@@ -195,16 +235,16 @@ def setup_problem(
   if job_tag in queued_job_tags:
     print(f"Skipping. Simulation is already queued: {sim_label}")
     return
-  total_mpi_ranks = int(domain_params["total_mpi_ranks"])
+  mpi_ranks = int(domain_params["mpi_ranks_requested"])
   job_path = pbs_job_manager.create_pbs_job_script(
     system_name        = "gadi",
     directory          = target_problem_dir,
     file_name          = f"job.sh",
-    command            = f". ~/modules_quokka\nmpirun -np {total_mpi_ranks} {exe_file_name} {input_file_name}",
+    command            = f". ~/modules_quokka\nmpirun -np {mpi_ranks} {exe_file_name} {input_file_name}",
     tag_name           = job_tag,
     queue_name         = "normal", # "rsaa",
     compute_group_name = "jh2", # "mk27",
-    num_procs          = total_mpi_ranks,
+    num_procs          = mpi_ranks,
     wall_time_hours    = 5,
     storage_group_name = "jh2",
     email_address      = "neco.kriel@anu.edu.au",
@@ -225,6 +265,7 @@ def main():
   problem_name = "AlfvenWaveLinear"
   scaling_mode = "weak"
   cells_per_block_dim = 2 ** 5 # 32
+  num_procs_per_node = 48
   queued_jobs = pbs_job_manager.get_list_of_queued_jobs() or []
   queued_job_tags = [
     job_tag
@@ -236,12 +277,15 @@ def main():
     ## - fix `boxes_per_rank`
     ## - increase `blocks_per_sim_dim`
     ## - where `cells_per_block_dim` is fixed (to keep things fair)
-    for blocks_per_sim_dim in [2, 4, 8, 16]:
+    for blocks_per_sim_dim in [1, 2, 3, 4, 5]:
+      ## required: (blocks_per_sim_dim / blocks_per_box_dim) ** 3 % (boxes_per_rank * num_procs_per_node) == 0
       domain_params = get_domain_params(
-        cells_per_block_dim = cells_per_block_dim,
-        blocks_per_sim_dim  = blocks_per_sim_dim,
-        blocks_per_box_dim  = 1,
-        boxes_per_rank      = 1,
+        cells_per_block_dim   = cells_per_block_dim,
+        blocks_per_sim_dim    = blocks_per_sim_dim,
+        blocks_per_box_dim    = 1,
+        boxes_per_rank        = 1,
+        num_procs_per_node    = num_procs_per_node,
+        round_to_nearest_node = True
       )
       setup_problem(
         scaling_mode    = scaling_mode,
@@ -259,10 +303,12 @@ def main():
     ## - where `cells_per_block_dim` is fixed (to keep things fair)
     for boxes_per_rank in [8, 4, 2, 1]:
       domain_params = get_domain_params(
-        cells_per_block_dim = cells_per_block_dim,
-        blocks_per_sim_dim  = 16,
-        blocks_per_box_dim  = 1,
-        boxes_per_rank      = boxes_per_rank,
+        cells_per_block_dim   = cells_per_block_dim,
+        blocks_per_sim_dim    = 16,
+        blocks_per_box_dim    = 1,
+        boxes_per_rank        = boxes_per_rank,
+        num_procs_per_node    = num_procs_per_node,
+        round_to_nearest_node = True
       )
       setup_problem(
         scaling_mode    = scaling_mode,
