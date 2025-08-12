@@ -5,10 +5,10 @@ from jormi.ww_io import io_manager, shell_manager, json_files
 from jormi.ww_jobs import pbs_job_manager
 
 PAPER_DIR = Path(__file__).resolve().parent.parent
-QUOKKA_DIR = Path("/Users/necoturb/Documents/Codes/quokka") # macOS
-# QUOKKA_DIR = Path("/g/data1b/jh2/nk7952/quokka/") # gadi
+# QUOKKA_DIR = Path("/Users/necoturb/Documents/Codes/quokka") # macOS
+QUOKKA_DIR = Path("/g/data1b/jh2/nk7952/quokka/") # gadi
 
-EXECUTE_JOB = False
+EXECUTE_JOB = True
 QUOKKA_PROBLEM_SET = {
   "AlfvenWaveLinear": {
     "exe": "test_alfven_wave_linear",
@@ -95,6 +95,7 @@ def get_domain_params(
   mpi_rank_utilisation = 100 * mpi_ranks_w_work / mpi_ranks_requested
   return {
     ## AMReX params
+    "amr.max_level"         : 0,
     "amr.n_cell"            : f"{cells_per_sim_dim} {cells_per_sim_dim} {cells_per_sim_dim}",
     "amr.max_grid_size"     : cells_per_box_dim,
     "amr.blocking_factor_x" : cells_per_block_dim,
@@ -231,7 +232,7 @@ def setup_problem(
   problem_input_file = target_problem_dir / input_file_name
   adjust_input_file(problem_input_file, sim_params)
   ## create job
-  job_tag = sim_label
+  job_tag = sim_label.replace("=", "")
   if job_tag in queued_job_tags:
     print(f"Skipping. Simulation is already queued: {sim_label}")
     return
@@ -277,7 +278,7 @@ def main():
     ## - fix `boxes_per_rank`
     ## - increase `blocks_per_sim_dim`
     ## - where `cells_per_block_dim` is fixed (to keep things fair)
-    for blocks_per_sim_dim in [1, 2, 3, 4, 5]:
+    for blocks_per_sim_dim in [2, 3, 4, 5]:
       ## required: (blocks_per_sim_dim / blocks_per_box_dim) ** 3 % (boxes_per_rank * num_procs_per_node) == 0
       domain_params = get_domain_params(
         cells_per_block_dim   = cells_per_block_dim,
