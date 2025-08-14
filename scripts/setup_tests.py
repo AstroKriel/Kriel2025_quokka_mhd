@@ -9,6 +9,7 @@ QUOKKA_DIR = Path("/g/data1b/jh2/nk7952/quokka/") # gadi
 DATA_DIR = Path("/scratch/jh2/nk7952/quokka")
 
 EXECUTE_JOB = True
+SAVE_DATA = True
 QUOKKA_PROBLEM_SET = {
   "AlfvenWaveLinear": {
     "exe": "test_alfven_wave_linear",
@@ -139,7 +140,7 @@ def get_sim_params(domain_params: dict[str, Any]) -> dict[str, Any]:
     "amr.blocking_factor_y"        : domain_params["amr.blocking_factor_y"],
     "amr.blocking_factor_z"        : domain_params["amr.blocking_factor_z"],
     ## output interval
-    "plotfile_interval"            : 10,
+    "plotfile_interval"            : 10 if SAVE_DATA else -1,
     "checkpoint_interval"          : -1,
   }
 
@@ -265,7 +266,7 @@ def main():
   quokka_build = "fs_scheme"
   problem_name = "AlfvenWaveLinear"
   scaling_mode = "weak"
-  cells_per_block_dim = 2 ** 5 # 32
+  cells_per_block_dim = 2 ** 2 # 4
   num_procs_per_node = 48
   queued_jobs = pbs_job_manager.get_list_of_queued_jobs() or []
   queued_job_tags = [
@@ -278,7 +279,7 @@ def main():
     ## - fix `boxes_per_rank`
     ## - increase `blocks_per_sim_dim`
     ## - where `cells_per_block_dim` is fixed (to keep things fair)
-    for blocks_per_sim_dim in [2, 3, 4, 5]:
+    for blocks_per_sim_dim in [1, 2, 3, 4, 5]:
       ## required: (blocks_per_sim_dim / blocks_per_box_dim) ** 3 % (boxes_per_rank * num_procs_per_node) == 0
       domain_params = get_domain_params(
         cells_per_block_dim   = cells_per_block_dim,
