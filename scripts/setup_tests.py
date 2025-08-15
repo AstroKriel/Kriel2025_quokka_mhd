@@ -4,33 +4,53 @@ from pathlib import Path
 from jormi.ww_io import io_manager, shell_manager, json_files
 from jormi.ww_jobs import pbs_job_manager
 
-# QUOKKA_DIR = Path("/Users/necoturb/Documents/Codes/quokka") # macOS
-QUOKKA_DIR = Path("/g/data1b/jh2/nk7952/quokka/") # gadi
-DATA_DIR = Path("/scratch/jh2/nk7952/quokka")
+## macOS
+QUOKKA_DIR = Path("/Users/necoturb/Documents/Codes/quokka")
+DATA_DIR = Path(__file__).parent.parent
 
-EXECUTE_JOB = True
-SAVE_DATA = True
+# ## gadi
+# QUOKKA_DIR = Path("/g/data1b/jh2/nk7952/quokka/")
+# DATA_DIR = Path("/scratch/jh2/nk7952/quokka")
+
+## setup params
+EXECUTE_JOB         = False
+SAVE_DATA           = True
+QUOKKA_BUILD        = "new_scheme"
+PROBLEM_NAME        = "OrszagTang"
+SCALING_MODE        = "weak"
+CELLS_PER_BLOCK_DIM = 2 ** 5 # 32
+CFL                 = 0.3
+RK_ORDER            = 2 # 1 or 2
+INTERP_ORDER        = 2 # 1, 2, 3, or 5
+EMF_AVE_SCHEME      = "LD04" # "BalsaraSpicer" or "LD04"
+NUM_PROCS_PER_NODE  = 48
+
 QUOKKA_PROBLEM_SET = {
   "AlfvenWaveLinear": {
     "exe": "test_alfven_wave_linear",
-    "input": "alfven_wave_linear.in"
+    "in": "alfven_wave_linear.in"
   },
   "AlfvenWaveCircular": {
     "exe": "test_alfven_wave_circular",
-    "input": "alfven_wave_circular.in"
+    "in": "alfven_wave_circular.in"
   },
   "FastWave": {
     "exe": "test_fast_wave",
-    "input": "fast_wave.in"
+    "in": "fast_wave.in"
   },
   "CurrentSheet": {
     "exe": "test_current_sheet",
-    "input": "current_sheet.in"
+    "in": "current_sheet.in"
   },
   "FieldLoop": {
     "exe": "test_field_loop",
-    "input": "field_loop.in"
+    "in": "field_loop.in"
   },
+  "OrszagTang": {
+    "exe": "test_orszag_tang",
+    "in": "orszag_tang.in",
+    "stop_time": 3
+  }
 }
 
 def is_power_of_two(value: int) -> bool:
@@ -123,15 +143,18 @@ def get_domain_params(
     "num_procs_per_node"    : num_procs_per_node,
   }
 
-def get_sim_params(domain_params: dict[str, Any]) -> dict[str, Any]:
-  return {
+def get_sim_params(
+    domain_params : dict[str, Any],
+    stop_time     : int | None = None,
+  ) -> dict[str, Any]:
+  sim_params = {
     ## scheme setup
-    "cfl"                          : 0.3,
+    "cfl"                          : CFL,
     "hydro.use_dual_energy"        : 0,
-    "hydro.rk_integrator_order"    : 2, # 1 or 2
-    "hydro.reconstruction_order"   : 5, # 1, 2, 3, or 5
-    "mhd.emf_reconstruction_order" : 5, # 1, 2, 3, or 5
-    "mhd.emf_averaging_method"     : "LD04", # "BalsaraSpicer" or "LD04"
+    "hydro.rk_integrator_order"    : RK_ORDER,
+    "hydro.reconstruction_order"   : INTERP_ORDER,
+    "mhd.emf_reconstruction_order" : INTERP_ORDER,
+    "mhd.emf_averaging_method"     : EMF_AVE_SCHEME,
     ## domain setup
     "amr.max_level"                : 0, # uniform grid
     "amr.n_cell"                   : domain_params["amr.n_cell"],
@@ -143,6 +166,9 @@ def get_sim_params(domain_params: dict[str, Any]) -> dict[str, Any]:
     "plotfile_interval"            : 10 if SAVE_DATA else -1,
     "checkpoint_interval"          : -1,
   }
+  if stop_time is not None:
+    sim_params["stop_time"] = stop_time
+  return sim_params
 
 def get_scheme_label(sim_params: dict) -> str:
   cfl            = "cfl={:.1f}".format(sim_params["cfl"])
@@ -178,15 +204,16 @@ def adjust_input_file(
     fp.write("\n".join(file_lines) + "\n")
 
 def setup_problem(
-    scaling_mode    : str, # "weak" or "strong"
-    quokka_build    : str, # "fs_scheme" or "new_scheme"
+    scaling_mode    : str,
+    quokka_build    : str,
     problem_name    : str,
     domain_params   : dict[str, Any],
     queued_job_tags : list[str],
   ):
   problem_files   = QUOKKA_PROBLEM_SET[problem_name]
   exe_file_name   = problem_files["exe"]
-  input_file_name = problem_files["input"]
+  input_file_name = problem_files["in"]
+  stop_time       = problem_files.get("stop_time", None)
   ## source paths
   source_exe_file_dir    = QUOKKA_DIR / "build" / quokka_build / "src" / "problems" / problem_name
   source_input_file_dir  = QUOKKA_DIR / "inputs"
@@ -198,10 +225,10 @@ def setup_problem(
   if not source_input_file_path.exists():
     raise FileNotFoundError(f"Error: Parameter file could not be found under: {source_input_file_path}")
   ## collect simulation parameter details
-  sim_params   = get_sim_params(domain_params)
+  sim_params   = get_sim_params(domain_params, stop_time)
   scheme_label = get_scheme_label(sim_params)
   domain_label = get_domain_label(domain_params)
-  sim_label    = f"{scheme_label}_{domain_label}"
+  sim_label    = f"{problem_name}_{scheme_label}_{domain_label}"
   ## target folder
   target_problem_dir = DATA_DIR / "sims" / scaling_mode / quokka_build / problem_name / scheme_label / domain_label
   io_manager.init_directory(target_problem_dir)
@@ -247,11 +274,11 @@ def setup_problem(
     queue_name         = "normal", # "rsaa",
     compute_group_name = "jh2", # "mk27",
     num_procs          = mpi_ranks,
-    wall_time_hours    = 5,
+    wall_time_hours    = 2,
     storage_group_name = "jh2",
     email_address      = "neco.kriel@anu.edu.au",
-    email_on_start     = True,
-    email_on_finish    = True,
+    email_on_start     = False,
+    email_on_finish    = False,
     verbose            = True,
   )
   if EXECUTE_JOB:
@@ -263,41 +290,36 @@ def setup_problem(
   print(f"Finished setting up under: {target_problem_dir}")
 
 def main():
-  quokka_build = "fs_scheme"
-  problem_name = "AlfvenWaveLinear"
-  scaling_mode = "weak"
-  cells_per_block_dim = 2 ** 2 # 4
-  num_procs_per_node = 48
   queued_jobs = pbs_job_manager.get_list_of_queued_jobs() or []
   queued_job_tags = [
     job_tag
     for _, job_tag in queued_jobs
   ]
-  if scaling_mode == "weak":
+  if "weak" in SCALING_MODE.lower():
     ## work per rank stays the same, but total work increases
     ## - fix `blocks_per_box_dim`
     ## - fix `boxes_per_rank`
     ## - increase `blocks_per_sim_dim`
     ## - where `cells_per_block_dim` is fixed (to keep things fair)
-    for blocks_per_sim_dim in [1, 2, 3, 4, 5]:
+    for blocks_per_sim_dim in [2]:
       ## required: (blocks_per_sim_dim / blocks_per_box_dim) ** 3 % (boxes_per_rank * num_procs_per_node) == 0
       domain_params = get_domain_params(
-        cells_per_block_dim   = cells_per_block_dim,
+        cells_per_block_dim   = CELLS_PER_BLOCK_DIM,
         blocks_per_sim_dim    = blocks_per_sim_dim,
         blocks_per_box_dim    = 1,
         boxes_per_rank        = 1,
-        num_procs_per_node    = num_procs_per_node,
+        num_procs_per_node    = NUM_PROCS_PER_NODE,
         round_to_nearest_node = True
       )
       setup_problem(
-        scaling_mode    = scaling_mode,
-        quokka_build    = quokka_build,
-        problem_name    = problem_name,
+        scaling_mode    = SCALING_MODE,
+        quokka_build    = QUOKKA_BUILD,
+        problem_name    = PROBLEM_NAME,
         domain_params   = domain_params,
         queued_job_tags = queued_job_tags,
       )
       print(" ")
-  elif scaling_mode == "strong":
+  elif "strong" in SCALING_MODE.lower():
     ## total work stays the same, but the work per rank decreases until communication overhead bites
     ## - fix `blocks_per_sim_dim`
     ## - fix `blocks_per_box_dim`
@@ -305,22 +327,22 @@ def main():
     ## - where `cells_per_block_dim` is fixed (to keep things fair)
     for boxes_per_rank in [8, 4, 2, 1]:
       domain_params = get_domain_params(
-        cells_per_block_dim   = cells_per_block_dim,
+        cells_per_block_dim   = CELLS_PER_BLOCK_DIM,
         blocks_per_sim_dim    = 16,
         blocks_per_box_dim    = 1,
         boxes_per_rank        = boxes_per_rank,
-        num_procs_per_node    = num_procs_per_node,
+        num_procs_per_node    = NUM_PROCS_PER_NODE,
         round_to_nearest_node = True
       )
       setup_problem(
-        scaling_mode    = scaling_mode,
-        quokka_build    = quokka_build,
-        problem_name    = problem_name,
+        scaling_mode    = SCALING_MODE,
+        quokka_build    = QUOKKA_BUILD,
+        problem_name    = PROBLEM_NAME,
         domain_params   = domain_params,
         queued_job_tags = queued_job_tags,
       )
       print(" ")
-  else: raise ValueError(f"`scaling_mode` must be `weak` or `strong` not `{scaling_mode}`.")
+  else: raise ValueError(f"`scaling_mode` must be `weak` or `strong` not `{SCALING_MODE}`.")
 
 if __name__ == "__main__":
   main()
