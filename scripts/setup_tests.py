@@ -4,24 +4,24 @@ from pathlib import Path
 from jormi.ww_io import io_manager, shell_manager, json_files
 from jormi.ww_jobs import pbs_job_manager
 
-## macOS
-QUOKKA_DIR = Path("/Users/necoturb/Documents/Codes/quokka")
-DATA_DIR = Path(__file__).parent.parent
+# ## macOS
+# QUOKKA_DIR = Path("/Users/necoturb/Documents/Codes/quokka")
+# DATA_DIR = Path(__file__).parent.parent
 
-# ## gadi
-# QUOKKA_DIR = Path("/g/data1b/jh2/nk7952/quokka/")
-# DATA_DIR = Path("/scratch/jh2/nk7952/quokka")
+## gadi
+QUOKKA_DIR = Path("/g/data1b/jh2/nk7952/quokka/")
+DATA_DIR = Path("/scratch/jh2/nk7952/quokka")
 
 ## setup params
-EXECUTE_JOB         = False
+EXECUTE_JOB         = True
 SAVE_DATA           = True
 QUOKKA_BUILD        = "new_scheme"
-PROBLEM_NAME        = "OrszagTang"
+PROBLEM_NAME        = "AlfvenWaveLinear"
 SCALING_MODE        = "weak"
 CELLS_PER_BLOCK_DIM = 2 ** 5 # 32
 CFL                 = 0.3
 RK_ORDER            = 2 # 1 or 2
-INTERP_ORDER        = 2 # 1, 2, 3, or 5
+INTERP_ORDER        = 1 # 1, 2, 3, or 5
 EMF_AVE_SCHEME      = "LD04" # "BalsaraSpicer" or "LD04"
 NUM_PROCS_PER_NODE  = 48
 
@@ -171,18 +171,18 @@ def get_sim_params(
   return sim_params
 
 def get_scheme_label(sim_params: dict) -> str:
-  cfl            = "cfl={:.1f}".format(sim_params["cfl"])
-  time_order     = "rk={}".format(sim_params["hydro.rk_integrator_order"])
-  spatial_order  = "ro={}".format(sim_params["hydro.reconstruction_order"])
+  cfl            = "cfl{:.1f}".format(sim_params["cfl"])
+  time_order     = "rk{}".format(sim_params["hydro.rk_integrator_order"])
+  spatial_order  = "ro{}".format(sim_params["hydro.reconstruction_order"])
   emf_ave_scheme = sim_params["mhd.emf_averaging_method"].lower()
   return "_".join([ cfl, time_order, spatial_order, emf_ave_scheme ])
 
 def get_domain_label(domain_params: dict[str, Any]) -> str:
-  cells_per_sim_dim   = "N={}".format(domain_params["cells_per_sim_dim"])
-  cells_per_box_dim   = "Nbo={}".format(domain_params["cells_per_box_dim"])
-  cells_per_block_dim = "Nbl={}".format(domain_params["cells_per_block_dim"])
-  boxes_per_rank      = "bopr={}".format(domain_params["boxes_per_rank"])
-  mpi_ranks_requested = "mpir={}".format(domain_params["mpi_ranks_requested"])
+  cells_per_sim_dim   = "N{}".format(domain_params["cells_per_sim_dim"])
+  cells_per_box_dim   = "Nbo{}".format(domain_params["cells_per_box_dim"])
+  cells_per_block_dim = "Nbl{}".format(domain_params["cells_per_block_dim"])
+  boxes_per_rank      = "bopr{}".format(domain_params["boxes_per_rank"])
+  mpi_ranks_requested = "mpir{}".format(domain_params["mpi_ranks_requested"])
   return "_".join([ cells_per_sim_dim, cells_per_box_dim, cells_per_block_dim, boxes_per_rank, mpi_ranks_requested ])
 
 def adjust_input_file(
@@ -265,11 +265,15 @@ def setup_problem(
     print(f"Skipping. Simulation is already queued: {sim_label}")
     return
   mpi_ranks = int(domain_params["mpi_ranks_requested"])
+  plot_script_path = (Path(__file__).parent / "../ww_quokka_sims/scripts/plot_field_slices.py").resolve()
   job_path = pbs_job_manager.create_pbs_job_script(
     system_name        = "gadi",
     directory          = target_problem_dir,
     file_name          = f"job.sh",
-    command            = f". ~/modules_quokka\nmpirun -np {mpi_ranks} {exe_file_name} {input_file_name}",
+    prep_command       = "source ~/modules_quokka",
+    main_command       = f"mpirun -np {mpi_ranks} {exe_file_name} {input_file_name}",
+    post_command       = f'uv run "{plot_script_path}" "{target_problem_dir}"',
+    always_run_post    = True,
     tag_name           = job_tag,
     queue_name         = "normal", # "rsaa",
     compute_group_name = "jh2", # "mk27",
@@ -301,7 +305,7 @@ def main():
     ## - fix `boxes_per_rank`
     ## - increase `blocks_per_sim_dim`
     ## - where `cells_per_block_dim` is fixed (to keep things fair)
-    for blocks_per_sim_dim in [2]:
+    for blocks_per_sim_dim in [1, 2, 3, 4, 5]:
       ## required: (blocks_per_sim_dim / blocks_per_box_dim) ** 3 % (boxes_per_rank * num_procs_per_node) == 0
       domain_params = get_domain_params(
         cells_per_block_dim   = CELLS_PER_BLOCK_DIM,
