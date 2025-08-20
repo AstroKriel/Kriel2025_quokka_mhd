@@ -4,26 +4,32 @@ from pathlib import Path
 from jormi.ww_io import io_manager, shell_manager, json_files
 from jormi.ww_jobs import pbs_job_manager
 
-# ## macOS
-# QUOKKA_DIR = Path("/Users/necoturb/Documents/Codes/quokka")
-# DATA_DIR = Path(__file__).parent.parent
+## macOS
+QUOKKA_DIR = Path("/Users/necoturb/Documents/Codes/quokka")
+DATA_DIR = Path(__file__).parent.parent
+PLOTTING_UV_PROJECT = Path("/Users/necoturb/Documents/Codes/asgard/sindri/python/ww_quokka_sims")
+PLOTTING_SCRIPT_PATH = PLOTTING_UV_PROJECT / "scripts/plot_field_slices.py"
 
-## gadi
-QUOKKA_DIR = Path("/g/data1b/jh2/nk7952/quokka/")
-DATA_DIR = Path("/scratch/jh2/nk7952/quokka")
+# ## gadi
+# QUOKKA_DIR = Path("/g/data1b/jh2/nk7952/quokka/")
+# DATA_DIR = Path("/scratch/jh2/nk7952/quokka")
+# PLOTTING_UV_PROJECT = Path("/home/586/nk7952/analysis/ww_quokka_sims")
+# PLOTTING_SCRIPT_PATH = PLOTTING_UV_PROJECT / "scripts/plot_field_slices.py"
 
 ## setup params
-EXECUTE_JOB         = True
-SAVE_DATA           = True
-QUOKKA_BUILD        = "new_scheme"
-PROBLEM_NAME        = "AlfvenWaveLinear"
-SCALING_MODE        = "weak"
-CELLS_PER_BLOCK_DIM = 2 ** 5 # 32
-CFL                 = 0.3
-RK_ORDER            = 2 # 1 or 2
-INTERP_ORDER        = 1 # 1, 2, 3, or 5
-EMF_AVE_SCHEME      = "LD04" # "BalsaraSpicer" or "LD04"
-NUM_PROCS_PER_NODE  = 48
+NUM_PROCS_PER_NODE = 48
+EXECUTE_JOB = False
+
+PROBLEM_NAME = "OrszagTang"
+SCALING_MODE = "weak"
+SAVE_DATA = True
+CELLS_PER_BLOCK_DIM = 2 ** 5 # 16
+
+USE_FC_VELOCITY_FOR_EMF = 0
+EMF_AVE_SCHEME = "LD04" # "BalsaraSpicer" or "LD04"
+INTERP_ORDER = 2 # 1, 2, 3, or 5
+RK_ORDER = 2 # 1 or 2
+CFL = 0.3
 
 QUOKKA_PROBLEM_SET = {
   "AlfvenWaveLinear": {
@@ -154,6 +160,7 @@ def get_sim_params(
     "hydro.rk_integrator_order"    : RK_ORDER,
     "hydro.reconstruction_order"   : INTERP_ORDER,
     "mhd.emf_reconstruction_order" : INTERP_ORDER,
+    "mhd.use_fc_velocity_for_emf"  : USE_FC_VELOCITY_FOR_EMF,
     "mhd.emf_averaging_method"     : EMF_AVE_SCHEME,
     ## domain setup
     "amr.max_level"                : 0, # uniform grid
@@ -171,11 +178,12 @@ def get_sim_params(
   return sim_params
 
 def get_scheme_label(sim_params: dict) -> str:
-  cfl            = "cfl{:.1f}".format(sim_params["cfl"])
-  time_order     = "rk{}".format(sim_params["hydro.rk_integrator_order"])
-  spatial_order  = "ro{}".format(sim_params["hydro.reconstruction_order"])
+  emf_method     = "fcvel" if USE_FC_VELOCITY_FOR_EMF else "fs"
   emf_ave_scheme = sim_params["mhd.emf_averaging_method"].lower()
-  return "_".join([ cfl, time_order, spatial_order, emf_ave_scheme ])
+  spatial_order  = "ro{}".format(sim_params["hydro.reconstruction_order"])
+  time_order     = "rk{}".format(sim_params["hydro.rk_integrator_order"])
+  cfl            = "cfl{:.1f}".format(sim_params["cfl"])
+  return "_".join([ emf_method, emf_ave_scheme, spatial_order, time_order, cfl ])
 
 def get_domain_label(domain_params: dict[str, Any]) -> str:
   cells_per_sim_dim   = "N{}".format(domain_params["cells_per_sim_dim"])
@@ -205,7 +213,6 @@ def adjust_input_file(
 
 def setup_problem(
     scaling_mode    : str,
-    quokka_build    : str,
     problem_name    : str,
     domain_params   : dict[str, Any],
     queued_job_tags : list[str],
@@ -215,7 +222,7 @@ def setup_problem(
   input_file_name = problem_files["in"]
   stop_time       = problem_files.get("stop_time", None)
   ## source paths
-  source_exe_file_dir    = QUOKKA_DIR / "build" / quokka_build / "src" / "problems" / problem_name
+  source_exe_file_dir    = QUOKKA_DIR / "build" / "src" / "problems" / problem_name
   source_input_file_dir  = QUOKKA_DIR / "inputs"
   source_exe_file_path   = source_exe_file_dir / exe_file_name
   source_input_file_path = source_input_file_dir / input_file_name
@@ -228,9 +235,9 @@ def setup_problem(
   sim_params   = get_sim_params(domain_params, stop_time)
   scheme_label = get_scheme_label(sim_params)
   domain_label = get_domain_label(domain_params)
-  sim_label    = f"{problem_name}_{scheme_label}_{domain_label}"
+  job_tag      = f"{problem_name}_{scheme_label}_{domain_label}"
   ## target folder
-  target_problem_dir = DATA_DIR / "sims" / scaling_mode / quokka_build / problem_name / scheme_label / domain_label
+  target_problem_dir = DATA_DIR / "sims" / scaling_mode / problem_name / scheme_label / domain_label
   io_manager.init_directory(target_problem_dir)
   ## save generated parameter files
   json_files.save_dict_to_json_file(
@@ -260,19 +267,20 @@ def setup_problem(
   problem_input_file = target_problem_dir / input_file_name
   adjust_input_file(problem_input_file, sim_params)
   ## create job
-  job_tag = sim_label.replace("=", "")
   if job_tag in queued_job_tags:
-    print(f"Skipping. Simulation is already queued: {sim_label}")
+    print(f"Skipping. Simulation is already queued: {job_tag}")
     return
   mpi_ranks = int(domain_params["mpi_ranks_requested"])
-  plot_script_path = (Path(__file__).parent / "../ww_quokka_sims/scripts/plot_field_slices.py").resolve()
   job_path = pbs_job_manager.create_pbs_job_script(
     system_name        = "gadi",
     directory          = target_problem_dir,
     file_name          = f"job.sh",
     prep_command       = "source ~/modules_quokka",
     main_command       = f"mpirun -np {mpi_ranks} {exe_file_name} {input_file_name}",
-    post_command       = f'uv run "{plot_script_path}" "{target_problem_dir}"',
+    post_command       = (
+      f'uv run --project "{PLOTTING_UV_PROJECT}" '
+      f'python "{PLOTTING_SCRIPT_PATH}" "{target_problem_dir}"'
+    ),
     always_run_post    = True,
     tag_name           = job_tag,
     queue_name         = "normal", # "rsaa",
@@ -294,7 +302,9 @@ def setup_problem(
   print(f"Finished setting up under: {target_problem_dir}")
 
 def main():
-  queued_jobs = pbs_job_manager.get_list_of_queued_jobs() or []
+  if EXECUTE_JOB:
+    queued_jobs = pbs_job_manager.get_list_of_queued_jobs() or []
+  else: queued_jobs = []
   queued_job_tags = [
     job_tag
     for _, job_tag in queued_jobs
@@ -305,7 +315,7 @@ def main():
     ## - fix `boxes_per_rank`
     ## - increase `blocks_per_sim_dim`
     ## - where `cells_per_block_dim` is fixed (to keep things fair)
-    for blocks_per_sim_dim in [1, 2, 3, 4, 5]:
+    for blocks_per_sim_dim in [2]:
       ## required: (blocks_per_sim_dim / blocks_per_box_dim) ** 3 % (boxes_per_rank * num_procs_per_node) == 0
       domain_params = get_domain_params(
         cells_per_block_dim   = CELLS_PER_BLOCK_DIM,
@@ -317,7 +327,6 @@ def main():
       )
       setup_problem(
         scaling_mode    = SCALING_MODE,
-        quokka_build    = QUOKKA_BUILD,
         problem_name    = PROBLEM_NAME,
         domain_params   = domain_params,
         queued_job_tags = queued_job_tags,
@@ -340,7 +349,6 @@ def main():
       )
       setup_problem(
         scaling_mode    = SCALING_MODE,
-        quokka_build    = QUOKKA_BUILD,
         problem_name    = PROBLEM_NAME,
         domain_params   = domain_params,
         queued_job_tags = queued_job_tags,
