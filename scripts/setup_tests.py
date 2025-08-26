@@ -14,9 +14,9 @@ DATA_DIR = Path("/scratch/jh2/nk7952/quokka")
 
 ## setup params
 NUM_PROCS_PER_NODE = 48
-EXECUTE_JOB = True
+EXECUTE_JOB = False
 
-PROBLEM_NAME = "CurrentSheet"
+PROBLEM_NAME = "OrszagTang"
 SCALING_MODE = "weak"
 SAVE_DATA = True
 CELLS_PER_BLOCK_DIM = 2 ** 5 # 32
@@ -285,7 +285,7 @@ def setup_problem(
     queue_name         = "normal", # "rsaa",
     compute_group_name = "jh2", # "mk27",
     num_procs          = mpi_ranks,
-    wall_time_hours    = 5,
+    wall_time_hours    = 12,
     storage_group_name = "jh2",
     email_address      = "neco.kriel@anu.edu.au",
     email_on_start     = False,
@@ -314,7 +314,7 @@ def main():
     ## - fix `boxes_per_rank`
     ## - increase `blocks_per_sim_dim`
     ## - where `cells_per_block_dim` is fixed (to keep things fair)
-    for blocks_per_sim_dim in [1, 2]:
+    for blocks_per_sim_dim in [8]:
       ## required: (blocks_per_sim_dim / blocks_per_box_dim) ** 3 % (boxes_per_rank * num_procs_per_node) == 0
       domain_params = get_domain_params(
         cells_per_block_dim   = CELLS_PER_BLOCK_DIM,
