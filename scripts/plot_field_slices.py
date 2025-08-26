@@ -4,9 +4,6 @@ import numpy
 from pathlib import Path
 from typing import Tuple, List
 
-import imageio.v3 as iio
-import imageio as iio_v2
-
 from yt.loaders import load as yt_load
 from jormi.ww_io import io_manager
 from jormi.ww_plots import plot_manager, plot_data
