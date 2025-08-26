@@ -8,19 +8,17 @@ from jormi.ww_jobs import pbs_job_manager
 QUOKKA_DIR = Path("/Users/necoturb/Documents/Codes/quokka")
 DATA_DIR = Path(__file__).parent.parent
 PLOTTING_UV_PROJECT = Path("/Users/necoturb/Documents/Codes/asgard/sindri/python/ww_quokka_sims")
-PLOTTING_SCRIPT_PATH = PLOTTING_UV_PROJECT / "scripts/plot_field_slices.py"
 
 # ## gadi
 # QUOKKA_DIR = Path("/g/data1b/jh2/nk7952/quokka/")
 # DATA_DIR = Path("/scratch/jh2/nk7952/quokka")
 # PLOTTING_UV_PROJECT = Path("/home/586/nk7952/analysis/ww_quokka_sims")
-# PLOTTING_SCRIPT_PATH = PLOTTING_UV_PROJECT / "scripts/plot_field_slices.py"
 
 ## setup params
 NUM_PROCS_PER_NODE = 48
 EXECUTE_JOB = False
 
-PROBLEM_NAME = "OrszagTang"
+PROBLEM_NAME = "AlfvenWaveLinear"
 SCALING_MODE = "weak"
 SAVE_DATA = True
 CELLS_PER_BLOCK_DIM = 2 ** 5 # 16
@@ -271,6 +269,7 @@ def setup_problem(
     print(f"Skipping. Simulation is already queued: {job_tag}")
     return
   mpi_ranks = int(domain_params["mpi_ranks_requested"])
+  plotting_script_path = PLOTTING_UV_PROJECT / "scripts/plot_field_slices.py"
   job_path = pbs_job_manager.create_pbs_job_script(
     system_name        = "gadi",
     directory          = target_problem_dir,
@@ -279,7 +278,7 @@ def setup_problem(
     main_command       = f"mpirun -np {mpi_ranks} {exe_file_name} {input_file_name}",
     post_command       = (
       f'uv run --project "{PLOTTING_UV_PROJECT}" '
-      f'python "{PLOTTING_SCRIPT_PATH}" "{target_problem_dir}"'
+      f'python "{plotting_script_path}" "{target_problem_dir}"'
     ),
     always_run_post    = True,
     tag_name           = job_tag,
@@ -315,7 +314,7 @@ def main():
     ## - fix `boxes_per_rank`
     ## - increase `blocks_per_sim_dim`
     ## - where `cells_per_block_dim` is fixed (to keep things fair)
-    for blocks_per_sim_dim in [2]:
+    for blocks_per_sim_dim in [1, 2, 3]:
       ## required: (blocks_per_sim_dim / blocks_per_box_dim) ** 3 % (boxes_per_rank * num_procs_per_node) == 0
       domain_params = get_domain_params(
         cells_per_block_dim   = CELLS_PER_BLOCK_DIM,
