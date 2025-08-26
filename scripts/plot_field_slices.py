@@ -122,18 +122,21 @@ def build_frames_with_parallel(data_dir: Path):
   slice_plane = ["yz", "xz", "xy"][SLICE_AXIS]
   print(f"Slice plane: {slice_plane}")
   png_paths = [
-    output_dir / f"frame_{i:05d}_{slice_plane}_plane.png_path"
-    for i in range(len(data_paths))
+    output_dir / f"frame_{frame_index:05d}_{slice_plane}_plane.png_path"
+    for frame_index in range(len(data_paths))
   ]
-  have_all_frames = all(dir.exists() for dir in png_paths)
-  if not ONLY_ANIMATE or not have_all_frames:
+  all_frames_are_rendered = all(
+    png_path.exists()
+    for png_path in png_paths
+  )
+  if not ONLY_ANIMATE or not all_frames_are_rendered:
     npy_paths = [
-      npy_dir / f"slice_{i:05d}.npy_path"
-      for i in range(len(data_paths))
+      npy_dir / f"slice_{frame_index:05d}.npy_path"
+      for frame_index in range(len(data_paths))
     ]
     grouped_args = [
-      (str(dir), str(npy_path))
-      for dir, npy_path in zip(data_paths, npy_paths)
+      (str(data_path), str(npy_path))
+      for data_path, npy_path in zip(data_paths, npy_paths)
     ]
     print(f"[Phase 1] Extracting slices...")
     extract_results = independent_tasks.run_in_parallel(
@@ -149,8 +152,8 @@ def build_frames_with_parallel(data_dir: Path):
     vmin, vmax = float(min(local_mins)), float(max(local_maxs))
     print(f"Global color limits: vmin={vmin:.6g}, vmax={vmax:.6g}")
     frame_titles = [
-      f"{dir.name}: t = {t:.3f}"
-      for dir, t in zip(data_paths, sim_times)
+      f"{data_path.name}: t = {t:.3f}"
+      for data_path, t in zip(data_paths, sim_times)
     ]
     render_args = [
       (str(npy_path), str(png_path), frame_title, vmin, vmax, slice_plane, USE_TEX)
