@@ -4,28 +4,26 @@ from pathlib import Path
 from jormi.ww_io import io_manager, shell_manager, json_files
 from jormi.ww_jobs import pbs_job_manager
 
-## macOS
-QUOKKA_DIR = Path("/Users/necoturb/Documents/Codes/quokka")
-DATA_DIR = Path(__file__).parent.parent
-PLOTTING_UV_PROJECT = Path("/Users/necoturb/Documents/Codes/asgard/sindri/python/ww_quokka_sims")
+# ## macOS
+# QUOKKA_DIR = Path("/Users/necoturb/Documents/Codes/quokka")
+# DATA_DIR = Path(__file__).parent.parent
 
-# ## gadi
-# QUOKKA_DIR = Path("/g/data1b/jh2/nk7952/quokka/")
-# DATA_DIR = Path("/scratch/jh2/nk7952/quokka")
-# PLOTTING_UV_PROJECT = Path("/home/586/nk7952/analysis/ww_quokka_sims")
+## gadi
+QUOKKA_DIR = Path("/g/data1b/jh2/nk7952/quokka/")
+DATA_DIR = Path("/scratch/jh2/nk7952/quokka")
 
 ## setup params
 NUM_PROCS_PER_NODE = 48
-EXECUTE_JOB = False
+EXECUTE_JOB = True
 
-PROBLEM_NAME = "AlfvenWaveLinear"
+PROBLEM_NAME = "CurrentSheet"
 SCALING_MODE = "weak"
 SAVE_DATA = True
-CELLS_PER_BLOCK_DIM = 2 ** 5 # 16
+CELLS_PER_BLOCK_DIM = 2 ** 5 # 32
 
-USE_FC_VELOCITY_FOR_EMF = 0
+USE_FC_VELOCITY_FOR_EMF = 1
 EMF_AVE_SCHEME = "LD04" # "BalsaraSpicer" or "LD04"
-INTERP_ORDER = 2 # 1, 2, 3, or 5
+INTERP_ORDER = 3 # 1, 2, 3, or 5
 RK_ORDER = 2 # 1 or 2
 CFL = 0.3
 
@@ -44,7 +42,8 @@ QUOKKA_PROBLEM_SET = {
   },
   "CurrentSheet": {
     "exe": "test_current_sheet",
-    "in": "current_sheet.in"
+    "in": "current_sheet.in",
+    "stop_time": 3
   },
   "FieldLoop": {
     "exe": "test_field_loop",
@@ -269,7 +268,8 @@ def setup_problem(
     print(f"Skipping. Simulation is already queued: {job_tag}")
     return
   mpi_ranks = int(domain_params["mpi_ranks_requested"])
-  plotting_script_path = PLOTTING_UV_PROJECT / "scripts/plot_field_slices.py"
+  uv_project = Path(__file__).parent.parent
+  plotting_script_path = uv_project / "scripts/plot_field_slices.py"
   job_path = pbs_job_manager.create_pbs_job_script(
     system_name        = "gadi",
     directory          = target_problem_dir,
@@ -277,7 +277,7 @@ def setup_problem(
     prep_command       = "source ~/modules_quokka",
     main_command       = f"mpirun -np {mpi_ranks} {exe_file_name} {input_file_name}",
     post_command       = (
-      f'uv run --project "{PLOTTING_UV_PROJECT}" '
+      f'uv run --project "{uv_project}" '
       f'python "{plotting_script_path}" "{target_problem_dir}"'
     ),
     always_run_post    = True,
@@ -285,11 +285,11 @@ def setup_problem(
     queue_name         = "normal", # "rsaa",
     compute_group_name = "jh2", # "mk27",
     num_procs          = mpi_ranks,
-    wall_time_hours    = 2,
+    wall_time_hours    = 5,
     storage_group_name = "jh2",
     email_address      = "neco.kriel@anu.edu.au",
     email_on_start     = False,
-    email_on_finish    = False,
+    email_on_finish    = True,
     verbose            = True,
   )
   if EXECUTE_JOB:
@@ -314,7 +314,7 @@ def main():
     ## - fix `boxes_per_rank`
     ## - increase `blocks_per_sim_dim`
     ## - where `cells_per_block_dim` is fixed (to keep things fair)
-    for blocks_per_sim_dim in [1, 2, 3]:
+    for blocks_per_sim_dim in [1, 2]:
       ## required: (blocks_per_sim_dim / blocks_per_box_dim) ** 3 % (boxes_per_rank * num_procs_per_node) == 0
       domain_params = get_domain_params(
         cells_per_block_dim   = CELLS_PER_BLOCK_DIM,
