@@ -71,8 +71,8 @@ def render_frame(
     npy_path    : str,
     png_path    : str,
     frame_title : str,
-    vmin        : float,
-    vmax        : float,
+    min_value   : float,
+    max_value   : float,
     slice_plane : str,
     use_tex     : bool = False,
   ) -> str:
@@ -92,7 +92,7 @@ def render_frame(
     ax           = ax,
     field_slice  = field_slice,
     axis_bounds  = (-1, 1, -1, 1),
-    cbar_bounds  = (vmin, vmax),
+    cbar_bounds  = (min_value, max_value),
     cmap_name    = "cmr.iceburn",
     add_colorbar = True,
     cbar_label   = "",
@@ -146,17 +146,18 @@ def build_frames_with_parallel(data_dir: Path):
       timeout_seconds = 300,
       show_progress   = True,
     )
-    sim_times  = [t for (t, _, _) in extract_results]
-    local_mins = [mn for (_, mn, _) in extract_results]
-    local_maxs = [mx for (_, _, mx) in extract_results]
-    vmin, vmax = float(min(local_mins)), float(max(local_maxs))
-    print(f"Global color limits: vmin={vmin:.6g}, vmax={vmax:.6g}")
+    sim_times  = [ sim_time for (sim_time, _, _) in extract_results ]
+    local_mins = [ min_value for (_, min_value, _) in extract_results ]
+    local_maxs = [ max_value for (_, _, max_value) in extract_results ]
+    min_value = float(min(local_mins))
+    max_value = float(max(local_maxs))
+    print(f"Global color limits: min={min_value:.6g}, max={max_value:.6g}")
     frame_titles = [
       f"{data_path.name}: t = {t:.3f}"
       for data_path, t in zip(data_paths, sim_times)
     ]
     render_args = [
-      (str(npy_path), str(png_path), frame_title, vmin, vmax, slice_plane, USE_TEX)
+      (str(npy_path), str(png_path), frame_title, min_value, max_value, slice_plane, USE_TEX)
       for npy_path, png_path, frame_title in zip(npy_paths, png_paths, frame_titles)
     ]
     print(f"[Phase 2] Rendering frames...")
