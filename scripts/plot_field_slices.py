@@ -4,67 +4,73 @@ import numpy
 from pathlib import Path
 from typing import Tuple, List
 
-import imageio.v3 as iio
-import imageio as iio_v2
-
 from yt.loaders import load as yt_load
 from jormi.ww_io import io_manager
 from jormi.ww_plots import plot_manager, plot_data
 from jormi.parallelism import independent_tasks
 
 DEFAULT_DATA_DIR = Path(
-  "/scratch/jh2/nk7952/quokka/sims/weak/OrszagTang/fcvel_ld04_ro3_rk2_cfl0.3/N64_Nbo32_Nbl32_bopr1_mpir8/"
+  "/scratch/jh2/nk7952/quokka/sims/weak/OrszagTang/fcvel_ld04_ro3_rk2_cfl0.3/N512_Nbo64_Nbl64_bopr1_mpir528/"
 )
 
 FIELD_NAME   = ("boxlib", "x-BField")
 SLICE_AXIS   = 2 # 0:x, 1:y, 2:z
 available_procs = (os.cpu_count() or 1)
-capped_procs = min(available_procs, 20)
+capped_procs = min(available_procs, 24)
 NUM_PROCS    = max(1, capped_procs - 1)
 ONLY_ANIMATE = False
 USE_TEX      = False
 
 def find_data_paths(directory: Path) -> List[Path]:
   data_paths = [
-    dir for dir in directory.iterdir()
+    path
+    for path in directory.iterdir()
     if all([
-      dir.is_dir(),
-      "plt" in dir.name,
-      "old" not in dir.name
+      path.is_dir(),
+      "plt" in path.name,
+      "old" not in path.name
     ])
   ]
-  data_paths.sort(key=lambda dir: int(dir.name.split("plt")[1]))
+  data_paths.sort(
+    key = lambda path: int(
+      path.name.split("plt")[1]
+    )
+  )
   return data_paths
 
 def get_mid_slice(
     arr  : numpy.ndarray,
-    axis : int
+    axis : int,
   ) -> numpy.ndarray:
   return numpy.take(arr, arr.shape[axis] // 2, axis=axis)
 
-def worker_extract_slice(
-    plotfile_path : str,
-    npy_out       : str
+def extract_slice(
+    data_path : str,
+    npy_path  : str,
   ) -> Tuple[float, float, float]:
   ## force a headless backend per process
   import matplotlib
   matplotlib.use("Agg", force=True)
-  ds = yt_load(plotfile_path)
+  ds = yt_load(data_path)
   sim_time = float(ds.current_time)
-  cg = ds.covering_grid(level=0, left_edge=ds.domain_left_edge, dims=ds.domain_dimensions)
-  data3d = numpy.asarray(cg[FIELD_NAME], dtype=numpy.float32)
-  slice2d = get_mid_slice(data3d, SLICE_AXIS)
-  numpy.save(npy_out, slice2d)
+  cg = ds.covering_grid(
+    level     = 0,
+    left_edge = ds.domain_left_edge,
+    dims      = ds.domain_dimensions,
+  )
+  data_cube = numpy.asarray(cg[FIELD_NAME], dtype=numpy.float32)
+  data_slice = get_mid_slice(data_cube, SLICE_AXIS)
+  numpy.save(npy_path, data_slice)
   try:
     ds.close()
   except Exception:
     pass
-  return sim_time, float(slice2d.min()), float(slice2d.max())
+  return sim_time, float(data_slice.min()), float(data_slice.max())
 
-def worker_render_frame(
+def render_frame(
     npy_path    : str,
-    frame_png   : str,
-    title       : str,
+    png_path    : str,
+    frame_title : str,
     vmin        : float,
     vmax        : float,
     slice_plane : str,
@@ -92,47 +98,49 @@ def worker_render_frame(
     cbar_label   = "",
     cbar_side    = "right",
   )
-  ax.set_title(title)
+  ax.set_title(frame_title)
   ticks = [-1.0, -0.5, 0.0, 0.5, 1.0]
-  ax.set_xticks(ticks); ax.set_yticks(ticks)
+  ax.set_xticks(ticks)
+  ax.set_yticks(ticks)
   ax.set_xticklabels(str(v) for v in ticks)
   ax.set_yticklabels(str(v) for v in ticks)
   ax.set_xlabel(f"{slice_plane[0]} axis")
   ax.set_ylabel(f"{slice_plane[1]} axis")
-  fig.savefig(frame_png, dpi=150)
+  fig.savefig(png_path, dpi=150)
   plt.close(fig)
-  return frame_png
+  return png_path
 
 def build_frames_with_parallel(data_dir: Path):
   print(f"Looking at: {data_dir}")
   output_dir = data_dir / "frames"
-  tmp_dir    = output_dir / "_tmp_slices"
+  npy_dir = output_dir / "_npy_slices"
   io_manager.init_directory(output_dir)
-  io_manager.init_directory(tmp_dir)
+  io_manager.init_directory(npy_dir)
   data_paths = find_data_paths(data_dir)
   if not data_paths:
     raise SystemExit(f"No data_paths found in {data_dir}")
   slice_plane = ["yz", "xz", "xy"][SLICE_AXIS]
   print(f"Slice plane: {slice_plane}")
-  frame_pngs = [
-    output_dir / f"frame_{i:05d}_{slice_plane}_plane.png"
+  png_paths = [
+    output_dir / f"frame_{i:05d}_{slice_plane}_plane.png_path"
     for i in range(len(data_paths))
   ]
-  have_all_frames = all(dir.exists() for dir in frame_pngs)
+  have_all_frames = all(dir.exists() for dir in png_paths)
   if not ONLY_ANIMATE or not have_all_frames:
-    slice_npys = [
-      tmp_dir / f"slice_{i:05d}.npy"
+    npy_paths = [
+      npy_dir / f"slice_{i:05d}.npy_path"
       for i in range(len(data_paths))
     ]
-    extract_args = [
-      (str(dir), str(npy))
-      for dir, npy in zip(data_paths, slice_npys)
+    grouped_args = [
+      (str(dir), str(npy_path))
+      for dir, npy_path in zip(data_paths, npy_paths)
     ]
     print(f"[Phase 1] Extracting slices...")
     extract_results = independent_tasks.run_in_parallel(
-      func            = worker_extract_slice,
-      grouped_args    = extract_args,
-      timeout_seconds = 90,
+      func            = extract_slice,
+      grouped_args    = grouped_args,
+      num_workers     = NUM_PROCS,
+      timeout_seconds = 300,
       show_progress   = True,
     )
     sim_times  = [t for (t, _, _) in extract_results]
@@ -140,19 +148,20 @@ def build_frames_with_parallel(data_dir: Path):
     local_maxs = [mx for (_, _, mx) in extract_results]
     vmin, vmax = float(min(local_mins)), float(max(local_maxs))
     print(f"Global color limits: vmin={vmin:.6g}, vmax={vmax:.6g}")
-    titles = [
+    frame_titles = [
       f"{dir.name}: t = {t:.3f}"
       for dir, t in zip(data_paths, sim_times)
     ]
     render_args = [
-      (str(npy), str(png), title, vmin, vmax, slice_plane, USE_TEX)
-      for npy, png, title in zip(slice_npys, frame_pngs, titles)
+      (str(npy_path), str(png_path), frame_title, vmin, vmax, slice_plane, USE_TEX)
+      for npy_path, png_path, frame_title in zip(npy_paths, png_paths, frame_titles)
     ]
     print(f"[Phase 2] Rendering frames...")
     _ = independent_tasks.run_in_parallel(
-      func            = worker_render_frame,
+      func            = render_frame,
       grouped_args    = render_args,
-      timeout_seconds = 90,
+      num_workers     = NUM_PROCS,
+      timeout_seconds = 300,
       show_progress   = True,
       enable_plotting = True,
     )
