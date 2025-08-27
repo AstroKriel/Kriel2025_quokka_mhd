@@ -4,13 +4,13 @@ from pathlib import Path
 from jormi.ww_io import io_manager, shell_manager, json_files
 from jormi.ww_jobs import pbs_job_manager
 
-# ## macOS
-# QUOKKA_DIR = Path("/Users/necoturb/Documents/Codes/quokka")
-# DATA_DIR = Path(__file__).parent.parent
+## macOS
+QUOKKA_DIR = Path("/Users/necoturb/Documents/Codes/quokka")
+DATA_DIR = Path(__file__).parent.parent
 
-## gadi
-QUOKKA_DIR = Path("/g/data1b/jh2/nk7952/quokka/")
-DATA_DIR = Path("/scratch/jh2/nk7952/quokka")
+# ## gadi
+# QUOKKA_DIR = Path("/g/data1b/jh2/nk7952/quokka/")
+# DATA_DIR = Path("/scratch/jh2/nk7952/quokka")
 
 ## setup params
 NUM_PROCS_PER_NODE = 48
@@ -19,9 +19,9 @@ EXECUTE_JOB = False
 PROBLEM_NAME = "OrszagTang"
 SCALING_MODE = "weak"
 SAVE_DATA = True
-CELLS_PER_BLOCK_DIM = 2 ** 5 # 32
+CELLS_PER_BLOCK_DIM = 2 ** 3 # 8
 
-USE_FC_VELOCITY_FOR_EMF = 1
+EMF_SCHEME = 0
 EMF_AVE_SCHEME = "LD04" # "BalsaraSpicer" or "LD04"
 INTERP_ORDER = 3 # 1, 2, 3, or 5
 RK_ORDER = 2 # 1 or 2
@@ -157,7 +157,7 @@ def get_sim_params(
     "hydro.rk_integrator_order"    : RK_ORDER,
     "hydro.reconstruction_order"   : INTERP_ORDER,
     "mhd.emf_reconstruction_order" : INTERP_ORDER,
-    "mhd.use_fc_velocity_for_emf"  : USE_FC_VELOCITY_FOR_EMF,
+    "mhd.emf_scheme"               : EMF_SCHEME,
     "mhd.emf_averaging_method"     : EMF_AVE_SCHEME,
     ## domain setup
     "amr.max_level"                : 0, # uniform grid
@@ -175,12 +175,12 @@ def get_sim_params(
   return sim_params
 
 def get_scheme_label(sim_params: dict) -> str:
-  emf_method     = "fcvel" if USE_FC_VELOCITY_FOR_EMF else "fs"
+  emf_scheme     = "fcvel" if EMF_SCHEME else "fs"
   emf_ave_scheme = sim_params["mhd.emf_averaging_method"].lower()
   spatial_order  = "ro{}".format(sim_params["hydro.reconstruction_order"])
   time_order     = "rk{}".format(sim_params["hydro.rk_integrator_order"])
   cfl            = "cfl{:.1f}".format(sim_params["cfl"])
-  return "_".join([ emf_method, emf_ave_scheme, spatial_order, time_order, cfl ])
+  return "_".join([ emf_scheme, emf_ave_scheme, spatial_order, time_order, cfl ])
 
 def get_domain_label(domain_params: dict[str, Any]) -> str:
   cells_per_sim_dim   = "N{}".format(domain_params["cells_per_sim_dim"])
@@ -314,7 +314,7 @@ def main():
     ## - fix `boxes_per_rank`
     ## - increase `blocks_per_sim_dim`
     ## - where `cells_per_block_dim` is fixed (to keep things fair)
-    for blocks_per_sim_dim in [8]:
+    for blocks_per_sim_dim in [3]:
       ## required: (blocks_per_sim_dim / blocks_per_box_dim) ** 3 % (boxes_per_rank * num_procs_per_node) == 0
       domain_params = get_domain_params(
         cells_per_block_dim   = CELLS_PER_BLOCK_DIM,
