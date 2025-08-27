@@ -10,7 +10,9 @@ from jormi.ww_plots import plot_manager, plot_data
 from jormi.parallelism import independent_tasks
 
 DEFAULT_DATA_DIR = Path(
-  "/scratch/jh2/nk7952/quokka/sims/weak/OrszagTang/fcvel_ld04_ro3_rk2_cfl0.3/N512_Nbo64_Nbl64_bopr1_mpir528/"
+  # "/scratch/jh2/nk7952/quokka/sims/weak/OrszagTang/fcvel_ld04_ro3_rk2_cfl0.3/N512_Nbo64_Nbl64_bopr1_mpir528/"
+  # "/Users/necoturb/Documents/Codes/asgard/mimir/kriel_2025_quokka_mhd/sims/weak/OrszagTang/fcvel_ld04_ro3_rk2_cfl0.3/N24_Nbo8_Nbl8_bopr1_mpir27"
+  "/Users/necoturb/Documents/Codes/asgard/mimir/kriel_2025_quokka_mhd/sims/weak/OrszagTang/fs_ld04_ro3_rk2_cfl0.3/N24_Nbo8_Nbl8_bopr1_mpir27"
 )
 
 FIELD_NAME   = ("boxlib", "x-BField")
@@ -122,7 +124,7 @@ def build_frames_with_parallel(data_dir: Path):
   slice_plane = ["yz", "xz", "xy"][SLICE_AXIS]
   print(f"Slice plane: {slice_plane}")
   png_paths = [
-    output_dir / f"frame_{frame_index:05d}_{slice_plane}_plane.png_path"
+    output_dir / f"frame_{frame_index:05d}_{slice_plane}_plane.png"
     for frame_index in range(len(data_paths))
   ]
   all_frames_are_rendered = all(
@@ -131,7 +133,7 @@ def build_frames_with_parallel(data_dir: Path):
   )
   if not ONLY_ANIMATE or not all_frames_are_rendered:
     npy_paths = [
-      npy_dir / f"slice_{frame_index:05d}.npy_path"
+      npy_dir / f"slice_{frame_index:05d}.npy"
       for frame_index in range(len(data_paths))
     ]
     grouped_args = [
@@ -188,3 +190,5 @@ def main():
 
 if __name__ == "__main__":
   main()
+
+## .
