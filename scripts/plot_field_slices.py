@@ -10,10 +10,8 @@ from jormi.ww_plots import plot_manager, plot_data
 from jormi.parallelism import independent_tasks
 
 DEFAULT_DATA_DIR = Path(
-  # "/scratch/jh2/nk7952/quokka/sims/weak/OrszagTang/fcvel_ld04_ro3_rk2_cfl0.3/N512_Nbo64_Nbl64_bopr1_mpir528/"
-  # "/Users/necoturb/Documents/Codes/asgard/mimir/kriel_2025_quokka_mhd/sims/weak/OrszagTang/fcvel_ld04_ro3_rk2_cfl0.3/N24_Nbo8_Nbl8_bopr1_mpir27"
-  "/Users/necoturb/Documents/Codes/asgard/mimir/kriel_2025_quokka_mhd/sims/weak/OrszagTang/fs_ld04_ro3_rk2_cfl0.3/N24_Nbo8_Nbl8_bopr1_mpir27"
-)
+  "~/Documents/Codes/asgard/mimir/kriel_2025_quokka_mhd/sims/weak/FieldLoop/fcvel_ld04_ro5_rk2_cfl0.3/N32_Nbo8_Nbl8_bopr1_mpir96"
+).expanduser()
 
 FIELD_NAME   = ("boxlib", "x-BField")
 SLICE_AXIS   = 2 # 0:x, 1:y, 2:z
@@ -21,7 +19,8 @@ available_procs = (os.cpu_count() or 1)
 capped_procs = min(available_procs, 24)
 NUM_PROCS    = max(1, capped_procs - 1)
 ONLY_ANIMATE = False
-USE_TEX      = False
+USE_TEX      = True
+DARK_MODE    = True
 
 def find_data_paths(directory: Path) -> List[Path]:
   data_paths = [
@@ -80,6 +79,24 @@ def render_frame(
   ) -> str:
   import matplotlib
   matplotlib.use("Agg", force=True)
+  import matplotlib as mpl
+  if DARK_MODE:
+    mpl.rcParams.update({
+      "figure.facecolor": "#0b0b0e",
+      "axes.facecolor":   "#0b0b0e",
+      "savefig.facecolor":"#0b0b0e",
+      "axes.edgecolor":   "#e6e6e6",
+      "axes.labelcolor":  "#e6e6e6",
+      "text.color":       "#e6e6e6",
+      "xtick.color":      "#cfcfd2",
+      "ytick.color":      "#cfcfd2",
+      "grid.color":       "#2e2e35",
+    })
+    try:
+      import matplotlib.pyplot as _plt
+      _plt.style.use("dark_background")
+    except Exception:
+      pass
   if use_tex:
     ## isolate latex cache per process
     import os, tempfile
@@ -97,7 +114,7 @@ def render_frame(
     cbar_bounds  = (min_value, max_value),
     cmap_name    = "cmr.iceburn",
     add_colorbar = True,
-    cbar_label   = "",
+    cbar_label   = r"$\delta b_z$",
     cbar_side    = "right",
   )
   ax.set_title(frame_title)
@@ -108,6 +125,13 @@ def render_frame(
   ax.set_yticklabels(str(v) for v in ticks)
   ax.set_xlabel(f"{slice_plane[0]} axis")
   ax.set_ylabel(f"{slice_plane[1]} axis")
+  for _ax in fig.axes:
+    _ax.tick_params(colors="#cfcfd2")
+    _ax.xaxis.label.set_color("#e6e6e6")
+    _ax.yaxis.label.set_color("#e6e6e6")
+    _ax.title.set_color("#e6e6e6")
+    for _spine in _ax.spines.values():
+      _spine.set_color("#e6e6e6")
   fig.savefig(png_path, dpi=150)
   plt.close(fig)
   return png_path
