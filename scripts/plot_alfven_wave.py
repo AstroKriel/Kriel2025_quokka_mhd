@@ -1,20 +1,22 @@
+## { SCRIPT
+
+
 import os
 import sys
 import numpy
 from pathlib import Path
-from typing import Tuple, List
 
 from yt.loaders import load as yt_load
 from jormi.ww_io import io_manager
-from jormi.ww_plots import plot_manager, add_color
+from jormi.ww_plots import plot_manager, add_color, plot_styler
 from jormi.parallelism import independent_tasks
 
 DEFAULT_DATA_DIR = Path(
-  "/Users/necoturb/Documents/Codes/asgard/mimir/kriel_2025_quokka_mhd/sims/weak/AlfvenWaveLinear/fcvel_ld04_ro3_rk2_cfl0.3/N8_Nbo8_Nbl8_bopr1_mpir1"
-  # "/Users/necoturb/Documents/Codes/asgard/mimir/kriel_2025_quokka_mhd/sims/weak/AlfvenWaveLinear/fcvel_ld04_ro3_rk2_cfl0.3/N16_Nbo8_Nbl8_bopr1_mpir8"
-  # "/Users/necoturb/Documents/Codes/asgard/mimir/kriel_2025_quokka_mhd/sims/weak/AlfvenWaveLinear/fcvel_ld04_ro3_rk2_cfl0.3/N32_Nbo8_Nbl8_bopr1_mpir96"
-  # "/Users/necoturb/Documents/Codes/asgard/mimir/kriel_2025_quokka_mhd/sims/weak/AlfvenWaveLinear/fcvel_ld04_ro3_rk2_cfl0.3/N48_Nbo8_Nbl8_bopr1_mpir240"
-)
+  # "~/Documents/Codes/asgard/mimir/kriel_2025_quokka_mhd/sims/weak/AlfvenWaveLinear/fcvel_ld04_ro3_rk2_cfl0.3/N8_Nbo8_Nbl8_bopr1_mpir1"
+  # "~/Documents/Codes/asgard/mimir/kriel_2025_quokka_mhd/sims/weak/AlfvenWaveLinear/fcvel_ld04_ro3_rk2_cfl0.3/N16_Nbo8_Nbl8_bopr1_mpir8"
+  # "~/Documents/Codes/asgard/mimir/kriel_2025_quokka_mhd/sims/weak/AlfvenWaveLinear/fcvel_ld04_ro3_rk2_cfl0.3/N32_Nbo8_Nbl8_bopr1_mpir96"
+  "~/Documents/Codes/asgard/mimir/kriel_2025_quokka_mhd/sims/weak/AlfvenWaveLinear/fcvel_ld04_ro3_rk2_cfl0.3/N48_Nbo8_Nbl8_bopr1_mpir240"
+).expanduser()
 
 FIELD_NAME   = ("boxlib", "z-BField")  # Bx
 PROFILE_AXIS = 0  # 0:x, 1:y, 2:z  (we want x)
@@ -22,8 +24,9 @@ available_procs = (os.cpu_count() or 1)
 capped_procs = min(available_procs, 24)
 NUM_PROCS    = max(1, capped_procs - 1)
 USE_TEX      = False
+DARK_MODE    = True
 
-def find_data_paths(directory: Path) -> List[Path]:
+def find_data_paths(directory: Path) -> list[Path]:
   data_paths = [
     path for path in directory.iterdir()
     if all([path.is_dir(), "plt" in path.name, "old" not in path.name])
@@ -52,7 +55,7 @@ def _axis_centers(ds, axis: int) -> numpy.ndarray:
 
 def worker_extract_profile(
     data_path : str,
-  ) -> Tuple[float, numpy.ndarray, numpy.ndarray] | None:
+  ) -> tuple[float, numpy.ndarray, numpy.ndarray] | None:
   ds = yt_load(data_path)
   sim_time = float(ds.current_time)
   x_centers = _axis_centers(ds, PROFILE_AXIS)
@@ -129,7 +132,10 @@ def main():
   if not data_dir.exists():
     print(f"Error: data directory does not exist: {data_dir}")
     sys.exit(1)
+  if DARK_MODE: plot_styler.apply_theme_globally(theme="dark")
   plot_profiles(data_dir)
 
 if __name__ == "__main__":
   main()
+
+## } SCRIPT

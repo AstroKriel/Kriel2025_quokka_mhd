@@ -4,7 +4,6 @@ import sys
 import gc
 import numpy
 from pathlib import Path
-from typing import List, Tuple
 
 from yt.loaders import load as yt_load
 from jormi.ww_io import io_manager
@@ -18,7 +17,7 @@ FIELD_NAME = ("boxlib", "x-BField")
 SLICE_AXIS = 2  # 0:x, 1:y, 2:z
 USE_TEX    = False  # keep simple/headless
 
-def find_data_paths(directory: Path) -> List[Path]:
+def find_data_paths(directory: Path) -> list[Path]:
   data_paths = [
     d for d in directory.iterdir()
     if d.is_dir() and ("plt" in d.name) and ("old" not in d.name)
@@ -36,7 +35,6 @@ def render_one_frame(
   use_tex      : bool = False,
   auto_cbar    : bool = True,
 ) -> None:
-  # headless + no TeX by default
   import matplotlib
   matplotlib.use("Agg", force=True)
   matplotlib.rcParams["text.usetex"] = bool(use_tex)
@@ -57,7 +55,7 @@ def render_one_frame(
     slice2d = get_mid_slice(data3d, SLICE_AXIS)
 
     # per-frame color range: no global vmin/vmax
-    cbar_bounds: Tuple[float, float] | None
+    cbar_bounds: tuple[float, float] | None
     if auto_cbar:
       vmin = float(slice2d.min())
       vmax = float(slice2d.max())

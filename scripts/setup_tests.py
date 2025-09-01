@@ -1,3 +1,6 @@
+## { SCRIPT
+
+
 import math
 from typing import Any, Union
 from pathlib import Path
@@ -16,14 +19,14 @@ DATA_DIR = Path(__file__).parent.parent
 NUM_PROCS_PER_NODE = 48
 EXECUTE_JOB = False
 
-PROBLEM_NAME = "OrszagTang"
+PROBLEM_NAME = "FieldLoop"
 SCALING_MODE = "weak"
 SAVE_DATA = True
 CELLS_PER_BLOCK_DIM = 2 ** 3 # 8
 
-EMF_SCHEME = 0
+EMF_SCHEME = 1
 EMF_AVE_SCHEME = "LD04" # "BalsaraSpicer" or "LD04"
-INTERP_ORDER = 3 # 1, 2, 3, or 5
+INTERP_ORDER = 5 # 1, 2, 3, or 5
 RK_ORDER = 2 # 1 or 2
 CFL = 0.3
 
@@ -314,7 +317,7 @@ def main():
     ## - fix `boxes_per_rank`
     ## - increase `blocks_per_sim_dim`
     ## - where `cells_per_block_dim` is fixed (to keep things fair)
-    for blocks_per_sim_dim in [3]:
+    for blocks_per_sim_dim in [6,7]:
       ## required: (blocks_per_sim_dim / blocks_per_box_dim) ** 3 % (boxes_per_rank * num_procs_per_node) == 0
       domain_params = get_domain_params(
         cells_per_block_dim   = CELLS_PER_BLOCK_DIM,
@@ -358,4 +361,4 @@ def main():
 if __name__ == "__main__":
   main()
 
-## .
+## } SCRIPT
