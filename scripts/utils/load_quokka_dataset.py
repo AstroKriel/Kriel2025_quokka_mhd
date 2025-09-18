@@ -1,7 +1,7 @@
 ## { MODULE
 
 ##
-## === DEPENDENCIES ===
+## === DEPENDENCIES
 ##
 
 import numpy
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from yt.loaders import load as yt_load
 
 ##
-## === FUNCTIONS ===
+## === FUNCTIONS
 ##
 
 
@@ -36,6 +36,17 @@ class UniformDomain:
             (z_max - z_min) / n_cells_z,
         )
 
+    @property
+    def domain_lengths(
+        self,
+    ) -> tuple[float, float, float]:
+        (x_min, x_max), (y_min, y_max), (z_min, z_max) = self.domain_bounds
+        return (
+            x_max - x_min,
+            y_max - y_min,
+            z_max - z_min,
+        )
+
 
 @dataclass(frozen=True)
 class VectorField:
@@ -45,7 +56,7 @@ class VectorField:
 
 
 ##
-## === OPERATOR CLASS ===
+## === OPERATOR CLASS
 ##
 
 
@@ -59,10 +70,10 @@ class QuokkaDataset:
 
     def __init__(
         self,
-        plt_directory: str | Path,
+        dataset_dir: str | Path,
         keep_open: bool = False,
     ):
-        self.plt_directory = Path(plt_directory)
+        self.dataset_dir = Path(dataset_dir)
         self.keep_open = keep_open
         self.dataset = None
         self.sim_time = None
@@ -72,7 +83,7 @@ class QuokkaDataset:
         self,
     ) -> None:
         if self.dataset is None:
-            self.dataset = yt_load(str(self.plt_directory))
+            self.dataset = yt_load(str(self.dataset_dir))
             self.sim_time = float(self.dataset.current_time)
 
     def _close_dataset_if_needed(
@@ -156,7 +167,7 @@ class QuokkaDataset:
         covering_grid = self._get_covering_grid()
         components_by_index: dict[int, numpy.ndarray] = {}
         for field_key, component_index in self.MAGNETIC_FIELD_KEYS_TO_INDEX.items():
-            field_data = numpy.asarray(covering_grid[field_key], dtype=numpy.float32)
+            field_data = numpy.asarray(covering_grid[field_key], dtype=numpy.float64)
             if field_data.ndim != 3:
                 self._close_dataset_if_needed()
                 raise ValueError(f"Expected 3-D array for {field_key}, got shape {field_data.shape}")
