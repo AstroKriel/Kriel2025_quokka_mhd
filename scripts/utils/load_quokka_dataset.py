@@ -253,10 +253,10 @@ class QuokkaDataset:
         vfield_mom = self.load_momentum_vfield()
         sfield_rho = self.load_density_sfield()
         with numpy.errstate(divide="ignore", invalid="ignore"):
-            sfield_vel = vfield_mom.data / sfield_rho.data[numpy.newaxis, ...]
+            vfield_vel = vfield_mom.data / sfield_rho.data[numpy.newaxis, ...]
         return field_types.VectorField(
             sim_time=self.sim_time,
-            data=sfield_vel,
+            data=vfield_vel,
             labels=("V_x", "V_y", "V_z"),
         )
 
