@@ -19,7 +19,6 @@ from jormi.ww_fields import field_types, field_operators
 class QuokkaDataset:
     """
     Interface for loading Quokka datasets with yt.
-    Provides helpers for density, energy, momentum, magnetic, and velocity fields.
     """
 
     def __init__(
@@ -49,14 +48,14 @@ class QuokkaDataset:
         _traceback,
     ):
         self._in_context = False
-        self._close_dataset()  # unconditional close at context exit
+        self._close_dataset()
 
     def _open_dataset_if_needed(
         self,
     ) -> None:
         if self.dataset is None:
             if not self.verbose:
-                ## reduce yt verbosity: only print warnings, errors, and critical messages
+                ## reduce yt verbosity: only print warnings, errors and critical messages
                 yt_logger.setLevel("WARNING")
             self.dataset = yt_load(str(self.dataset_dir))
             self._sim_time = float(self.dataset.current_time)
