@@ -7,7 +7,8 @@
 import numpy
 from pathlib import Path
 from jormi.ww_plots import plot_manager, add_color
-from utils import helpers, load_quokka_dataset
+from ww_quokka_sims.sim_io import load_dataset
+from utils import helpers
 
 ##
 ## === HELPERS
@@ -33,47 +34,31 @@ def _compute_centers(
     raise ValueError("axis must be one of: 'x', 'y', 'z'")
 
 
-def _extract_midline(
-    component_3d: numpy.ndarray,
+def _extract_profile(
+    sfield: numpy.ndarray,
     axis: str,
 ):
     ## extract 1-D profile along axis through the middle of the other two axes
-    nx, ny, nz = component_3d.shape
+    nx, ny, nz = sfield.shape
     ix = nx // 2
     iy = ny // 2
     iz = nz // 2
-    if axis == "x":
-        return component_3d[:, iy, iz]
-    if axis == "y":
-        return component_3d[ix, :, iz]
-    if axis == "z":
-        return component_3d[ix, iy, :]
+    if axis == "x": return sfield[:, iy, iz]
+    if axis == "y": return sfield[ix, :, iz]
+    if axis == "z": return sfield[ix, iy, :]
     raise ValueError("axis must be one of: 'x', 'y', 'z'")
 
 
 def _plot_profile_along_axis(
     ax,
-    component_3d: numpy.ndarray,
+    sfield: numpy.ndarray,
     domain,
     axis: str,
     color,
 ):
-    ## compute centerline profile along axis and draw a single line
-    x = _compute_centers(domain, axis)
-    centerline = _extract_midline(component_3d, axis)
-    ax.plot(x, centerline, lw=2.0, color=color)
-
-
-def _maybe_subsample_dirs(
-    dataset_dirs,
-    target_max: int = 25,
-):
-    ## subsample many snapshots to a fixed count for readability
-    n = len(dataset_dirs)
-    if n <= target_max:
-        return dataset_dirs
-    idx = numpy.linspace(0, n - 1, num=target_max, dtype=int)
-    return [dataset_dirs[i] for i in idx]
+    x_centers = _compute_centers(domain, axis)
+    y_profile = _extract_profile(sfield, axis)
+    ax.plot(x_centers, y_profile, lw=2.0, color=color)
 
 
 ##
@@ -83,105 +68,144 @@ def _maybe_subsample_dirs(
 
 class Plotter:
 
+    VALID_FIELDS = {
+        "mag": {
+            "loader": "load_magnetic_vfield",
+            "labels": {
+                "x": r"$b_x$",
+                "y": r"$b_y$",
+                "z": r"$b_z$",
+            },
+            "cmap": "Blues",
+            "fig_name": "b_profiles.png",
+        },
+        "vel": {
+            "loader": "load_velocity_vfield",
+            "labels": {
+                "x": r"$v_x$",
+                "y": r"$v_y$",
+                "z": r"$v_z$",
+            },
+            "cmap": "Oranges",
+            "fig_name": "v_profiles.png",
+        },
+    }
+
     def __init__(
         self,
         input_dir: Path,
-        components: list[str],
+        fields: list[str],
+        comp_names: list[str],
         axes: list[str],
     ):
-        ## validate inputs and normalise to x/y/z
-        _valid = {"x", "y", "z"}
-        if not components or not axes:
-            raise ValueError("You must provide at least one component (-c) and one axis (-a).")
-        if not set(components).issubset(_valid) or not set(axes).issubset(_valid):
+        _valid_axes = {"x", "y", "z"}
+        _valid_fields = set(self.VALID_FIELDS.keys())
+        if not fields or not comp_names or not axes:
+            raise ValueError(
+                "You must provide at least one field (-f vel/mag), one component (-c), and one axis (-a).",
+            )
+        if not set(fields).issubset(_valid_fields):
+            raise ValueError(f"Fields must be chosen from: {sorted(_valid_fields)}.")
+        if not set(comp_names).issubset(_valid_axes) or not set(axes).issubset(_valid_axes):
             raise ValueError("Components and axes must be chosen from: x y z.")
         self.input_dir = input_dir
-        self.components = list(components)
+        self.fields = list(fields)
+        self.comp_names = list(comp_names)
         self.axes = list(axes)
         self.comp_to_idx = {"x": 0, "y": 1, "z": 2}
-        self.comp_labels = {"x": r"$b_x$", "y": r"$b_y$", "z": r"$b_z$"}
 
     def run(
         self,
     ) -> None:
-        dataset_dirs, single_snapshot = self._resolve_dataset_dirs(self.input_dir)
-        num_rows = len(self.components)
+        dataset_dirs = helpers.resolve_dataset_dirs(self.input_dir)
+        for field in self.fields:
+            self._plot_field(field, dataset_dirs[:20])
+
+    def _plot_field(
+        self,
+        field,
+        dataset_dirs,
+    ):
+        specs = self.VALID_FIELDS[field]
+        comp_labels = specs["labels"]
+        cmap_name = specs["cmap"]
+        fig_name = specs["fig_name"]
+        num_rows = len(self.comp_names)
         num_cols = len(self.axes)
         fig, axs = plot_manager.create_figure(
             num_rows=num_rows,
             num_cols=num_cols,
             share_x=False,
-            y_spacing=0.15,
-            x_spacing=0.1,
+            y_spacing=0.25,
+            x_spacing=0.25,
         )
-        ## normalise axis for 2D indexing [row, col]
-        if (num_rows == 1) and (num_cols == 1):
-            axs_grid = [[axs]]
-        elif num_rows == 1:
-            axs_grid = [list(axs)]
-        elif num_cols == 1:
-            axs_grid = [[ax] for ax in axs]
+        axs_grid = helpers.get_axs_grid(axs, num_rows, num_cols)
+        if len(dataset_dirs) == 1:
+            self._plot_snapshot(axs_grid, dataset_dirs[0], field, color="black")
+            self._style_axes(axs_grid, comp_labels)
+            self._save(fig, fig_name=fig_name)
         else:
-            axs_grid = axs
-        if single_snapshot:
-            self._plot_single(axs_grid, dataset_dirs[0])
-            self._style_axes(axs_grid)
-            self._save(fig, out_name="b_profiles.png")
-        else:
-            dataset_dirs = _maybe_subsample_dirs(dataset_dirs, target_max=25)
-            self._plot_series(axs_grid, dataset_dirs)
-            self._style_axes(axs_grid)
-            self._add_series_colorbar(axs_grid, num_snapshots=len(dataset_dirs))
-        self._save(fig, out_name="b_profiles.png")
+            dataset_dirs_sub = helpers.subsample_dirs(dataset_dirs, target_max=25)
+            self._plot_series(axs_grid, dataset_dirs_sub, field, cmap_name=cmap_name)
+            self._style_axes(axs_grid, comp_labels)
+            self._add_series_colorbar(axs_grid, num_snapshots=len(dataset_dirs_sub), cmap_name=cmap_name)
+            self._save(fig, fig_name=fig_name)
 
-    def _plot_single(
+    def _load_vfield(
+        self,
+        ds,
+        field: str,
+    ):
+        specs = self.VALID_FIELDS[field]
+        loader_name = specs["loader"]
+        loader_fn = getattr(ds, loader_name)
+        return loader_fn()
+
+    def _plot_snapshot(
         self,
         axs_grid,
         dataset_dir: Path,
+        field: str,
+        color: str | tuple[float, float, float, float] = "black",
     ) -> None:
-        ## single snapshot: black centerline per subplot
-        with load_quokka_dataset.QuokkaDataset(dataset_dir=dataset_dir) as ds:
-            vfield_b = ds.load_magnetic_field()
+        ## single snapshot: one colored profile per subplot
+        with load_dataset.QuokkaDataset(dataset_dir=dataset_dir) as ds:
+            vfield = self._load_vfield(ds, field)
             domain = ds.load_domain()
-        for row_index, comp in enumerate(self.components):
-            comp_idx = self.comp_to_idx[comp]
-            comp_data = vfield_b.data[comp_idx]  ## (nx, ny, nz)
+        for row_index, comp_name in enumerate(self.comp_names):
+            comp_index = self.comp_to_idx[comp_name]
+            comp_data = vfield.data[comp_index]
             for col_index, axis in enumerate(self.axes):
                 ax = axs_grid[row_index][col_index]
-                _plot_profile_along_axis(ax, comp_data, domain, axis, color="black")
+                _plot_profile_along_axis(ax, comp_data, domain, axis, color=color)
 
     def _plot_series(
         self,
         axs_grid,
         dataset_dirs: list[Path],
+        field: str,
+        cmap_name: str,
     ) -> None:
         ## multiple snapshots: time-coloured centerlines with shared colorbar
         cmap, norm = add_color.create_cmap(
-            cmap_name="Blues",
+            cmap_name=cmap_name,
             cmin=0.25,
             vmin=0,
             vmax=len(dataset_dirs) - 1,
         )
         for t_index, dataset_dir in enumerate(dataset_dirs):
-            with load_quokka_dataset.QuokkaDataset(dataset_dir=dataset_dir) as ds:
-                vfield_b = ds.load_magnetic_field()
-                domain = ds.load_domain()
             color = cmap(norm(t_index))
-            for row_index, comp in enumerate(self.components):
-                comp_idx = self.comp_to_idx[comp]
-                comp_data = vfield_b.data[comp_idx]
-                for col_index, axis in enumerate(self.axes):
-                    ax = axs_grid[row_index][col_index]
-                    _plot_profile_along_axis(ax, comp_data, domain, axis, color=color)
+            self._plot_snapshot(axs_grid=axs_grid, dataset_dir=dataset_dir, field=field, color=color)
 
     def _add_series_colorbar(
         self,
         axs_grid,
         num_snapshots: int,
+        cmap_name: str,
     ) -> None:
         ## attach colorbar on the bottom-right axes for series plots
         cmap, norm = add_color.create_cmap(
-            cmap_name="Blues",
+            cmap_name=cmap_name,
             cmin=0.25,
             vmin=0,
             vmax=num_snapshots - 1,
@@ -195,34 +219,17 @@ class Plotter:
             ax_percentage=0.05,
         )
 
-    @staticmethod
-    def _resolve_dataset_dirs(
-        input_dir: Path,
-    ) -> tuple[list[Path], bool]:
-        ## determine whether input is a single snapshot or a series
-        if "plt" in input_dir.name:
-            dataset_dirs = [input_dir]
-            return dataset_dirs, True
-        dataset_dirs = helpers.get_latest_dataset_dirs(sim_dir=input_dir)
-        assert len(dataset_dirs) != 0
-        return dataset_dirs, len(dataset_dirs) == 1
-
     def _style_axes(
         self,
         axs_grid,
+        comp_labels: dict[str, str],
     ) -> None:
         ## apply titles, labels, and hide interior tick labels
-        for row_index, comp in enumerate(self.components):
+        for row_index, comp in enumerate(self.comp_names):
             for col_index, axis in enumerate(self.axes):
                 ax = axs_grid[row_index][col_index]
                 if col_index == 0:
-                    ax.set_ylabel(self.comp_labels[comp])
-                ## hide x tick labels for all but the bottom row
-                if row_index != len(axs_grid) - 1:
-                    ax.set_xticklabels([])
-                ## hide y tick labels for all but the left column
-                if col_index != 0:
-                    ax.set_yticklabels([])
+                    ax.set_ylabel(comp_labels[comp])
         for col_index, axis in enumerate(self.axes):
             ax = axs_grid[-1][col_index]
             ax.set_xlabel(axis)
@@ -230,9 +237,9 @@ class Plotter:
     def _save(
         self,
         fig,
-        out_name: str,
+        fig_name: str,
     ) -> None:
-        fig_path = Path(self.input_dir) / out_name
+        fig_path = Path(self.input_dir) / fig_name
         plot_manager.save_figure(fig=fig, fig_path=fig_path)
 
 
@@ -245,7 +252,8 @@ def main():
     args = helpers.get_user_input()
     plotter = Plotter(
         input_dir=args.dir,
-        components=args.components,
+        fields=args.fields,
+        comp_names=args.components,
         axes=args.axes,
     )
     plotter.run()
