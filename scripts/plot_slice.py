@@ -5,6 +5,10 @@
 ##
 
 import numpy
+from pathlib import Path
+from dataclasses import dataclass
+from jormi.ww_io import io_manager
+from jormi.utils import parallel_utils
 from jormi.ww_plots import plot_manager, plot_data, annotate_axis
 from jormi.ww_fields import field_types
 from ww_quokka_sims.sim_io import load_dataset
@@ -15,8 +19,8 @@ from utils import helpers
 ##
 
 
-def _compute_slice_bounds(
-    domain,
+def _get_slice_bounds(
+    domain: field_types.UniformDomain,
     axis_to_slice: str,
 ):
     (x_min, x_max), (y_min, y_max), (z_min, z_max) = domain.domain_bounds
@@ -26,7 +30,7 @@ def _compute_slice_bounds(
     raise ValueError("axis_to_slice must be one of: x, y, z")
 
 
-def _compute_slice_labels(
+def _get_slice_labels(
     axis_to_slice: str,
 ):
     if axis_to_slice == "z": return ("x", "y")
@@ -36,34 +40,35 @@ def _compute_slice_labels(
 
 
 def _slice_sfield(
-    sfield,
+    field_data: numpy.ndarray,
     axis_to_slice: str,
 ):
-    num_cells_x, num_cells_y, num_cells_z = sfield.shape
+    num_cells_x, num_cells_y, num_cells_z = field_data.shape
     slice_index_x = num_cells_x // 2
     slice_index_y = num_cells_y // 2
     slice_index_z = num_cells_z // 2
-    if axis_to_slice == "z": return sfield[:, :, slice_index_z], r"$(x, y, z=L_z/2)$"
-    if axis_to_slice == "y": return sfield[:, slice_index_y, :], r"$(x, y=L_y/2, z)$"
-    if axis_to_slice == "x": return sfield[slice_index_x, :, :], r"$(x=L_x/2, y, z)$"
+    if axis_to_slice == "z": return field_data[:, :, slice_index_z], r"$(x, y, z=L_z/2)$"
+    if axis_to_slice == "y": return field_data[:, slice_index_y, :], r"$(x, y=L_y/2, z)$"
+    if axis_to_slice == "x": return field_data[slice_index_x, :, :], r"$(x=L_x/2, y, z)$"
     raise ValueError("axis_to_slice must be one of: x, y, z")
 
 
 def _plot_slice(
     ax,
-    sfield,
+    sim_time,
+    field_data,
     domain,
     axis_to_slice: str,
     label: str,
     cmap_name: str,
 ):
-    sfield_slice, slice_label = _slice_sfield(sfield, axis_to_slice)
-    min_value = numpy.min(sfield_slice)
-    max_value = numpy.max(sfield_slice)
+    field_slice, slice_label = _slice_sfield(field_data, axis_to_slice)
+    min_value = numpy.min(field_slice)
+    max_value = numpy.max(field_slice)
     plot_data.plot_sfield_slice(
         ax=ax,
-        field_slice=sfield_slice,
-        axis_bounds=_compute_slice_bounds(domain, axis_to_slice),
+        field_slice=field_slice,
+        axis_bounds=_get_slice_bounds(domain, axis_to_slice),
         cmap_name=cmap_name,
         add_colorbar=True,
         cbar_label=label,
@@ -84,6 +89,17 @@ def _plot_slice(
     annotate_axis.add_text(
         ax=ax,
         x_pos=0.5,
+        y_pos=0.5,
+        x_alignment="center",
+        y_alignment="center",
+        label=rf"$t = {sim_time:.2e}$",
+        fontsize=16,
+        box_alpha=0.5,
+        add_box=True,
+    )
+    annotate_axis.add_text(
+        ax=ax,
+        x_pos=0.5,
         y_pos=0.05,
         x_alignment="center",
         y_alignment="bottom",
@@ -92,6 +108,76 @@ def _plot_slice(
         box_alpha=0.5,
         add_box=True,
     )
+
+
+##
+## === PLOTTER FUNCTION
+##
+
+
+@dataclass(frozen=True)
+class Task:
+    fig_dir: Path
+    dataset_dir: Path
+    field_name: str
+    components_to_plot: tuple[str, ...]
+    axes_to_slice: tuple[str, ...]
+    loader_name: str
+    cmap_name: str
+    verbose: bool
+
+
+def _plot_snapshot(
+    task: Task,
+):
+    with load_dataset.QuokkaDataset(dataset_dir=task.dataset_dir, verbose=task.verbose) as dataset:
+        domain = dataset.load_domain()
+        loader = getattr(dataset, task.loader_name)
+        field = loader()  # ScalarField or VectorField
+    sim_time = field.sim_time
+    lookup_comp_index = {"x": 0, "y": 1, "z": 2}
+    data_args: list[tuple[str, numpy.ndarray]] = []
+    if isinstance(field, field_types.VectorField):
+        if len(task.components_to_plot) == 0:
+            raise ValueError(f"Vector field '{task.field_name}' requires at least one component via -c")
+        for comp_name in tuple(sorted(task.components_to_plot)):
+            comp_index = lookup_comp_index[comp_name]
+            data_args.append((field.labels[comp_index], field.data[comp_index]))
+    elif isinstance(field, field_types.ScalarField):
+        data_args = [(field.label, field.data)]
+    else:
+        raise ValueError(f"{task.field_name} is an unrecognised field type.")
+    num_rows = len(data_args)
+    num_cols = len(task.axes_to_slice)
+    fig, axs = plot_manager.create_figure(
+        num_rows=num_rows,
+        num_cols=num_cols,
+        y_spacing=0.35,
+        x_spacing=0.25,
+    )
+    axs_grid = helpers.get_axs_grid(axs, num_rows, num_cols)
+    for row_index, (data_label, data_array) in enumerate(data_args):
+        for col_index, axis_to_slice in enumerate(task.axes_to_slice):
+            ax = axs_grid[row_index][col_index]
+            _plot_slice(
+                ax=ax,
+                sim_time=sim_time,
+                field_data=data_array,
+                domain=domain,
+                axis_to_slice=axis_to_slice,
+                label=data_label,
+                cmap_name=task.cmap_name,
+            )
+    for row_index in range(len(axs_grid)):
+        for col_index, axis_to_slice in enumerate(task.axes_to_slice):
+            ax = axs_grid[row_index][col_index]
+            xlabel, ylabel = _get_slice_labels(axis_to_slice)
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel(ylabel)
+    index_label = task.dataset_dir.name.split("plt")[1]
+    fig_name = f"{task.field_name}_slice_{index_label}.png"
+    fig_path = task.fig_dir / fig_name
+    plot_manager.save_figure(fig=fig, fig_path=fig_path, verbose=task.verbose)
 
 
 ##
@@ -104,121 +190,97 @@ class Plotter:
     VALID_FIELDS = {
         "mag": {
             "loader": "load_magnetic_vfield",
-            "cmap": "Blues"
+            "cmap": "Blues",
         },
         "vel": {
             "loader": "load_velocity_vfield",
-            "cmap": "Oranges"
+            "cmap": "Oranges",
         },
         "rho": {
             "loader": "load_density_sfield",
-            "cmap": "Greys"
+            "cmap": "Greys",
         },
         "Etot": {
-            "loader":"load_total_energy_sfield",
-            "cmap": "cividis"
+            "loader": "load_total_energy_sfield",
+            "cmap": "cividis",
         },
         "Emag": {
-            "loader":"load_magnetic_energy_sfield",
-            "cmap": "plasma"
+            "loader": "load_magnetic_energy_sfield",
+            "cmap": "plasma",
         },
     }
 
     def __init__(
         self,
-        input_dir,
-        fields: list[str],
+        *,
+        input_dir: Path,
+        fields_to_plot: list[str],
         components_to_plot: list[str],
         axes_to_slice: list[str],
+        use_parallel: bool = True,
     ):
         valid_axes = {"x", "y", "z"}
         valid_fields = set(self.VALID_FIELDS.keys())
-        if not fields or not set(fields).issubset(valid_fields):
-            raise ValueError(f"Provide one or more fields (via -f) from: {sorted(valid_fields)}")
+        if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
+            raise ValueError(f"Provide one or more field to plot (via -f) from: {sorted(valid_fields)}")
+        if components_to_plot and not set(components_to_plot).issubset(valid_axes):
+            raise ValueError("Provide one or more components (via -c) from: x, y, z")
         if not axes_to_slice or not set(axes_to_slice).issubset(valid_axes):
             raise ValueError("Provide one or more axes (via -a) from: x, y, z")
-        if components_to_plot and not set(components_to_plot).issubset(valid_axes):
-            raise ValueError("Components (via -c) must be from: x, y, z")
-        self.input_dir = input_dir
-        self.fields = list(fields)
-        self.axes_to_slice = list(axes_to_slice)
+        self.input_dir = Path(input_dir)
+        self.fields_to_plot = list(fields_to_plot)
         self.components_to_plot = list(components_to_plot)
+        self.axes_to_slice = list(axes_to_slice)
+        self.use_parallel = bool(use_parallel)
 
     def run(self) -> None:
         dataset_dirs = helpers.resolve_dataset_dirs(self.input_dir)
-        for field_name in self.fields:
-            if len(dataset_dirs) == 1:
-                fig_dir = dataset_dirs[0].parent
-                self._plot_snapshot(field_name, dataset_dirs[0], fig_dir)
-            else:
-                fig_dir = self.input_dir
-                for dataset_dir in dataset_dirs:
-                    self._plot_snapshot(field_name, dataset_dir, fig_dir)
-
-    def _load_field(self, ds, field_name: str):
-        field_loader = self.VALID_FIELDS[field_name]["loader"]
-        return getattr(ds, field_loader)()  # -> ScalarField or VectorField
-
-    def _plot_snapshot(
-        self,
-        field_name: str,
-        dataset_dir,
-        fig_dir,
-    ) -> None:
-        field_meta = self.VALID_FIELDS[field_name]
-        cmap_name = field_meta["cmap"]
-        with load_dataset.QuokkaDataset(dataset_dir=dataset_dir) as dataset:
-            field = self._load_field(dataset, field_name)  # ScalarField or VectorField
-            domain = dataset.load_domain()
-        rows: list[tuple[str, numpy.ndarray]] = []
-        if isinstance(field, field_types.VectorField):
-            component_to_index = {"x": 0, "y": 1, "z": 2}
-            components: tuple[str, ...] = (
-                tuple(self.components_to_plot) if self.components_to_plot else ("x", "y", "z")
-            )
-            for comp in components:
-                comp_index = component_to_index[comp]
-                rows.append((field.labels[comp_index], field.data[comp_index]))
-        elif isinstance(field, field_types.ScalarField):
-            rows = [(field.label, field.data)]
-        else:
-            raise ValueError(f"Unrecognised field type for '{field_name}'")
-        num_rows = len(rows)
-        num_cols = len(self.axes_to_slice)
-        fig, axs = plot_manager.create_figure(
-            num_rows=num_rows,
-            num_cols=num_cols,
-            y_spacing=0.35,
-            x_spacing=0.25,
-        )
-        axs_grid = helpers.get_axs_grid(axs, num_rows, num_cols)
-        for row_index, (row_label, row_data) in enumerate(rows):
-            for col_index, axis_to_slice in enumerate(self.axes_to_slice):
-                ax = axs_grid[row_index][col_index]
-                _plot_slice(
-                    ax=ax,
-                    sfield=row_data,
-                    domain=domain,
-                    axis_to_slice=axis_to_slice,
-                    label=row_label,
-                    cmap_name=cmap_name,
+        fig_dir = dataset_dirs[0].parent
+        tasks: list[Task] = []
+        for field_name in self.fields_to_plot:
+            field_meta = self.VALID_FIELDS[field_name]
+            loader_name = field_meta["loader"]
+            cmap_name = field_meta["cmap"]
+            for dataset_dir in dataset_dirs:
+                tasks.append(
+                    Task(
+                        fig_dir=Path(fig_dir),
+                        dataset_dir=Path(dataset_dir),
+                        field_name=field_name,
+                        components_to_plot=tuple(self.components_to_plot),
+                        axes_to_slice=tuple(self.axes_to_slice),
+                        loader_name=loader_name,
+                        cmap_name=cmap_name,
+                        verbose=False,
+                    ),
                 )
-        self._style_slice_axes(axs_grid)
-        index_label = dataset_dir.name.split("plt")[1]
-        fig_name = f"{field_name}_slice_{index_label}.png"
-        fig_path = fig_dir / fig_name
-        plot_manager.save_figure(fig=fig, fig_path=fig_path)
-
-    def _style_slice_axes(
-        self,
-        axs_grid,
-    ) -> None:
-        for row_index in range(len(axs_grid)):
-            for col_index, axis_to_slice in enumerate(self.axes_to_slice):
-                ax = axs_grid[row_index][col_index]
-                xlabel, ylabel = _compute_slice_labels(axis_to_slice)
-                ax.set_xlabel(xlabel)
-                ax.set_ylabel(ylabel)
+        if not tasks: return
+        if self.use_parallel and len(tasks) > 5:
+            parallel_utils.run_in_parallel(
+                func=_plot_snapshot,
+                grouped_args=tasks,
+                timeout_seconds=30,
+                show_progress=True,
+                enable_plotting=True,
+            )
+        else:
+            [_plot_snapshot(task_args) for task_args in tasks]
+        for field_name in self.fields_to_plot:
+            fig_paths = io_manager.ItemFilter(
+                prefix=f"{field_name}_slice_",
+                suffix=".png",
+                include_folders=False,
+                include_files=True,
+            ).filter(directory=fig_dir)
+            if len(fig_paths) < 3: continue
+            mp4_path = Path(fig_dir) / f"{field_name}_slices.mp4"
+            plot_manager.animate_pngs_to_mp4(
+                frames_dir=fig_dir,
+                mp4_path=mp4_path,
+                pattern=f"{field_name}_slice_*.png",
+                fps=30,
+                timeout_seconds=120,
+            )
 
 
 ##
@@ -230,9 +292,10 @@ def main():
     args = helpers.get_user_input()
     plotter = Plotter(
         input_dir=args.dir,
-        fields=args.fields,
+        fields_to_plot=args.fields,
         components_to_plot=args.components,
         axes_to_slice=args.axes,
+        use_parallel=True,
     )
     plotter.run()
 
