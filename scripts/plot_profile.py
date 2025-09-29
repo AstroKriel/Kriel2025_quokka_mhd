@@ -40,12 +40,12 @@ def _extract_profile(
 ):
     ## extract 1-D profile along axis through the middle of the other two axes
     nx, ny, nz = sfield.shape
-    ix = nx // 2
-    iy = ny // 2
-    iz = nz // 2
-    if axis == "x": return sfield[:, iy, iz]
-    if axis == "y": return sfield[ix, :, iz]
-    if axis == "z": return sfield[ix, iy, :]
+    slice_index_x = nx // 2
+    slice_index_y = ny // 2
+    slice_index_z = nz // 2
+    if axis == "x": return sfield[:, slice_index_y, slice_index_z]
+    if axis == "y": return sfield[slice_index_x, :, slice_index_z]
+    if axis == "z": return sfield[slice_index_x, slice_index_y, :]
     raise ValueError("axis must be one of: 'x', 'y', 'z'")
 
 

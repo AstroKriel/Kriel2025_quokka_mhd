@@ -38,9 +38,13 @@ def _slice_sfield(
     sfield,
     axis_to_slice: str,
 ):
-    if axis_to_slice == "z": return sfield[:, :, 0], r"$(x, y, z=0)$"
-    if axis_to_slice == "y": return sfield[:, 0, :], r"$(x, y=0, z)$"
-    if axis_to_slice == "x": return sfield[0, :, :], r"$(x=0, y, z)$"
+    nx, ny, nz = sfield.shape
+    slice_index_x = nx // 2
+    slice_index_y = ny // 2
+    slice_index_z = nz // 2
+    if axis_to_slice == "z": return sfield[:, :, slice_index_z], r"$(x, y, z=L_z/2)$"
+    if axis_to_slice == "y": return sfield[:, slice_index_y, :], r"$(x, y=L_y/2, z)$"
+    if axis_to_slice == "x": return sfield[slice_index_x, :, :], r"$(x=L_x/2, y, z)$"
     raise ValueError("axis_to_slice must be one of: x, y, z")
 
 
