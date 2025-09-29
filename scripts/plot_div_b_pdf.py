@@ -4,14 +4,13 @@
 ## === DEPENDENCIES
 ##
 
-from __future__ import annotations
 import numpy
 from pathlib import Path
-
 from jormi.ww_data import compute_stats
 from jormi.ww_plots import plot_manager, add_color
 from jormi.ww_fields import field_operators
-from utils import helpers, load_quokka_dataset
+from ww_quokka_sims.sim_io import load_dataset
+from utils import helpers
 
 ##
 ## === HELPERS
@@ -20,17 +19,17 @@ from utils import helpers, load_quokka_dataset
 
 def _estimate_div_b_pdf(
     vfield_b,
-    domain_lengths: tuple[float, float, float],
+    domain,
     num_bins: int = 50,
 ):
     ## compute divergence of magnetic field
     sfield_div_b = field_operators.compute_vfield_divergence(
-        vfield=vfield_b.data,
-        domain_lengths=domain_lengths,
+        vfield=vfield_b,
+        domain=domain,
     )
     ## estimate PDF of log10(|div(B)|)
     return compute_stats.estimate_pdf(
-        values=numpy.log10(numpy.absolute(sfield_div_b)),
+        values=numpy.log10(numpy.absolute(sfield_div_b.data)),
         num_bins=num_bins,
     )
 
@@ -51,9 +50,9 @@ class Plotter:
     def run(
         self,
     ) -> None:
-        dataset_dirs, single_snapshot = self._resolve_dataset_dirs(self.input_dir)
+        dataset_dirs = helpers.resolve_dataset_dirs(self.input_dir)
         fig, ax = plot_manager.create_figure()
-        if single_snapshot:
+        if len(dataset_dirs) == 1:
             self._plot_single(ax, dataset_dirs[0])
         else:
             self._plot_series(ax, dataset_dirs)
@@ -106,26 +105,13 @@ class Plotter:
         dataset_dir: Path,
     ):
         ## load dataset, extract B-field and domain, compute PDF
-        with load_quokka_dataset.QuokkaDataset(dataset_dir=dataset_dir) as ds:
-            vfield_b = ds.load_magnetic_field()
+        with load_dataset.QuokkaDataset(dataset_dir=dataset_dir) as ds:
+            vfield_b = ds.load_magnetic_vfield()
             domain = ds.load_domain()
         return _estimate_div_b_pdf(
             vfield_b=vfield_b,
-            domain_lengths=domain.domain_lengths,
+            domain=domain,
         )
-
-    @staticmethod
-    def _resolve_dataset_dirs(
-        input_dir: Path,
-    ) -> tuple[list[Path], bool]:
-        ## determine whether input is a single snapshot or a series
-        if "plt" in input_dir.name:
-            dataset_dirs = [input_dir]
-            return dataset_dirs, True
-        else:
-            dataset_dirs = helpers.get_latest_dataset_dirs(sim_dir=input_dir)
-            assert len(dataset_dirs) != 0
-            return dataset_dirs, len(dataset_dirs) == 1
 
     def _style_axes(
         self,

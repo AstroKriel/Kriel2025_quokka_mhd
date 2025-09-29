@@ -105,7 +105,7 @@ class Plotter:
             "labels": {
                 "x": r"$b_x$",
                 "y": r"$b_y$",
-                "z": r"$b_z$"
+                "z": r"$b_z$",
             },
             "cmap": "Blues",
             "fig_prefix": "b_slice_",
@@ -115,7 +115,7 @@ class Plotter:
             "labels": {
                 "x": r"$v_x$",
                 "y": r"$v_y$",
-                "z": r"$v_z$"
+                "z": r"$v_z$",
             },
             "cmap": "Oranges",
             "fig_prefix": "v_slice_",
@@ -146,11 +146,11 @@ class Plotter:
         self,
     ) -> None:
         dataset_dirs = helpers.resolve_dataset_dirs(self.input_dir)
-        for field in self.fields:
+        for field_name in self.fields:
             if len(dataset_dirs) == 1:
                 fig_dir = dataset_dirs[0].parent
                 self._plot_snapshot(
-                    field=field,
+                    field_name=field_name,
                     dataset_dir=dataset_dirs[0],
                     fig_dir=fig_dir,
                 )
@@ -158,7 +158,7 @@ class Plotter:
                 fig_dir = self.input_dir
                 for dataset_dir in dataset_dirs:
                     self._plot_snapshot(
-                        field=field,
+                        field_name=field_name,
                         dataset_dir=dataset_dir,
                         fig_dir=fig_dir,
                     )
@@ -166,21 +166,21 @@ class Plotter:
     def _load_vfield(
         self,
         ds,
-        field: str,
+        field_name: str,
     ):
-        specs = self.VALID_FIELDS[field]
-        loader_name = specs["loader"]
+        field_meta = self.VALID_FIELDS[field_name]
+        loader_name = field_meta["loader"]
         return getattr(ds, loader_name)()
 
     def _plot_snapshot(
         self,
-        field: str,
+        field_name: str,
         dataset_dir,
         fig_dir,
     ) -> None:
-        specs = self.VALID_FIELDS[field]
-        comp_labels = specs["labels"]
-        cmap_name = specs["cmap"]
+        field_meta = self.VALID_FIELDS[field_name]
+        comp_labels = field_meta["labels"]
+        cmap_name = field_meta["cmap"]
         num_rows = len(self.components_to_plot)
         num_cols = len(self.axes_to_slice)
         fig, axs = plot_manager.create_figure(
@@ -191,7 +191,7 @@ class Plotter:
         )
         axs_grid = helpers.get_axs_grid(axs, num_rows, num_cols)
         with load_dataset.QuokkaDataset(dataset_dir=dataset_dir) as dataset:
-            vfield = self._load_vfield(dataset, field)
+            vfield = self._load_vfield(dataset, field_name)
             domain = dataset.load_domain()
         for row_index, component in enumerate(self.components_to_plot):
             for col_index, axis_to_slice in enumerate(self.axes_to_slice):
@@ -207,7 +207,7 @@ class Plotter:
                 )
         self._style_slice_axes(axs_grid)
         index_label = dataset_dir.name.split("plt")[1]
-        fig_prefix = specs["fig_prefix"]
+        fig_prefix = field_meta["fig_prefix"]
         fig_name = f"{fig_prefix}{index_label}.png"
         fig_path = fig_dir / fig_name
         plot_manager.save_figure(fig=fig, fig_path=fig_path)
@@ -232,10 +232,10 @@ class Plotter:
 def main():
     args = helpers.get_user_input()
     plotter = Plotter(
-      input_dir=args.dir,
-      fields=args.fields,
-      components_to_plot=args.components,
-      axes_to_slice=args.axes,
+        input_dir=args.dir,
+        fields=args.fields,
+        components_to_plot=args.components,
+        axes_to_slice=args.axes,
     )
     plotter.run()
 

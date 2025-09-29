@@ -6,7 +6,8 @@
 
 from jormi.ww_plots import plot_manager, plot_data
 from jormi.ww_fields import field_operators
-from utils import helpers, load_quokka_dataset
+from ww_quokka_sims.sim_io import load_dataset
+from utils import helpers
 
 ##
 ## === HELPERS
@@ -28,7 +29,7 @@ def _compute_plane_bounds(
     raise ValueError("axis must be one of: x, y, z")
 
 
-def _slice_divb_midplane(
+def _slice_through_midplane(
     sfield_div_b,
     axis: str,
 ):
@@ -46,26 +47,15 @@ def _slice_divb_midplane(
     raise ValueError("axis must be one of: x, y, z")
 
 
-def _compute_divb(
-    vfield_b,
-    domain,
-):
-    return field_operators.compute_vfield_divergence(
-        vfield=vfield_b.data,
-        domain_lengths=domain.domain_lengths,
-    )
-
-
 def _plot_div_b_mid_slice(
     ax,
     sfield_div_b,
     domain,
     axis: str,
 ):
-    ## render a mid-plane slice with colorbar
     plot_data.plot_sfield_slice(
         ax=ax,
-        field_slice=_slice_divb_midplane(sfield_div_b, axis),
+        field_slice=_slice_through_midplane(sfield_div_b, axis),
         axis_bounds=_compute_plane_bounds(domain, axis),
         cmap_name="cmr.arctic",
         add_colorbar=True,
@@ -74,7 +64,7 @@ def _plot_div_b_mid_slice(
     )
 
 
-def _to_grid(
+def _cast_to_grid(
     axs,
     num_rows: int,
     num_cols: int,
@@ -95,7 +85,6 @@ def _to_grid(
 
 
 class Plotter:
-    ## wrapper for plotting mid-plane slices of div-b for one or more axes
 
     def __init__(
         self,
@@ -113,16 +102,16 @@ class Plotter:
         self,
     ) -> None:
         ## main routine: resolve datasets, branch, style, save
-        dataset_dirs, single_snapshot = self._resolve_dataset_dirs(self.input_dir)
-        if single_snapshot:
+        dataset_dirs = helpers.resolve_dataset_dirs(self.input_dir)
+        if len(dataset_dirs) == 1:
             num_rows, num_cols = 1, len(self.axes)
             fig, axs = plot_manager.create_figure(num_rows=num_rows, num_cols=num_cols)
-            axs_grid = _to_grid(axs, num_rows, num_cols)
+            axs_grid = _cast_to_grid(axs, num_rows, num_cols)
             self._plot_single(axs_grid, dataset_dirs[0])
         else:
             num_rows, num_cols = 2, len(self.axes)
             fig, axs = plot_manager.create_figure(num_rows=num_rows, num_cols=num_cols)
-            axs_grid = _to_grid(axs, num_rows, num_cols)
+            axs_grid = _cast_to_grid(axs, num_rows, num_cols)
             self._plot_series(axs_grid, dataset_dirs)
         self._style_axes(axs_grid)
         self._save(fig, out_name="div_b_slice.png")
@@ -133,10 +122,13 @@ class Plotter:
         dataset_dir,
     ) -> None:
         ## single snapshot: one row with columns per requested axis
-        with load_quokka_dataset.QuokkaDataset(dataset_dir=dataset_dir) as ds:
-            vfield_b = ds.load_magnetic_field()
+        with load_dataset.QuokkaDataset(dataset_dir=dataset_dir) as ds:
+            vfield_b = ds.load_magnetic_vfield()
             domain = ds.load_domain()
-        sfield_div_b = _compute_divb(vfield_b, domain)
+        sfield_div_b = field_operators.compute_vfield_divergence(
+            vfield=vfield_b,
+            domain=domain,
+        )
         for col_index, axis in enumerate(self.axes):
             ax = axs_grid[0][col_index]
             _plot_div_b_mid_slice(ax, sfield_div_b, domain, axis)
@@ -147,27 +139,18 @@ class Plotter:
         dataset_dirs,
     ) -> None:
         ## series: first and last snapshots as two rows; columns per axis
-        first_last = (dataset_dirs[0], dataset_dirs[-1])
-        for row_index, dataset_dir in enumerate(first_last):
-            with load_quokka_dataset.QuokkaDataset(dataset_dir=dataset_dir) as ds:
-                vfield_b = ds.load_magnetic_field()
+        datasets_to_plot = (dataset_dirs[0], dataset_dirs[-1])
+        for row_index, dataset_dir in enumerate(datasets_to_plot):
+            with load_dataset.QuokkaDataset(dataset_dir=dataset_dir) as ds:
+                vfield_b = ds.load_magnetic_vfield()
                 domain = ds.load_domain()
-            sfield_div_b = _compute_divb(vfield_b, domain)
+            sfield_div_b = field_operators.compute_vfield_divergence(
+                vfield=vfield_b,
+                domain=domain,
+            )
             for col_index, axis in enumerate(self.axes):
                 ax = axs_grid[row_index][col_index]
                 _plot_div_b_mid_slice(ax, sfield_div_b, domain, axis)
-
-    @staticmethod
-    def _resolve_dataset_dirs(
-        input_dir,
-    ):
-        ## determine whether input is a single snapshot or a series
-        if "plt" in input_dir.name:
-            dataset_dirs = [input_dir]
-            return dataset_dirs, True
-        dataset_dirs = helpers.get_latest_dataset_dirs(sim_dir=input_dir)
-        assert len(dataset_dirs) != 0
-        return dataset_dirs, (len(dataset_dirs) == 1)
 
     def _style_axes(
         self,

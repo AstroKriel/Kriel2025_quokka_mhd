@@ -102,7 +102,7 @@ class Plotter:
         _valid_fields = set(self.VALID_FIELDS.keys())
         if not fields or not comp_names or not axes:
             raise ValueError(
-                "You must provide at least one field (-f vel/mag), one component (-c), and one axis (-a).",
+                "You must provide at least one field_name (-f vel/mag), one component (-c), and one axis (-a).",
             )
         if not set(fields).issubset(_valid_fields):
             raise ValueError(f"Fields must be chosen from: {sorted(_valid_fields)}.")
@@ -118,18 +118,18 @@ class Plotter:
         self,
     ) -> None:
         dataset_dirs = helpers.resolve_dataset_dirs(self.input_dir)
-        for field in self.fields:
-            self._plot_field(field, dataset_dirs[:20])
+        for field_name in self.fields:
+            self._plot_field(field_name, dataset_dirs[:20])
 
     def _plot_field(
         self,
-        field,
+        field_name,
         dataset_dirs,
     ):
-        specs = self.VALID_FIELDS[field]
-        comp_labels = specs["labels"]
-        cmap_name = specs["cmap"]
-        fig_name = specs["fig_name"]
+        field_meta = self.VALID_FIELDS[field_name]
+        comp_labels = field_meta["labels"]
+        cmap_name = field_meta["cmap"]
+        fig_name = field_meta["fig_name"]
         num_rows = len(self.comp_names)
         num_cols = len(self.axes)
         fig, axs = plot_manager.create_figure(
@@ -141,23 +141,22 @@ class Plotter:
         )
         axs_grid = helpers.get_axs_grid(axs, num_rows, num_cols)
         if len(dataset_dirs) == 1:
-            self._plot_snapshot(axs_grid, dataset_dirs[0], field, color="black")
+            self._plot_snapshot(axs_grid, dataset_dirs[0], field_name, color="black")
             self._style_axes(axs_grid, comp_labels)
             self._save(fig, fig_name=fig_name)
         else:
-            dataset_dirs_sub = helpers.subsample_dirs(dataset_dirs, target_max=25)
-            self._plot_series(axs_grid, dataset_dirs_sub, field, cmap_name=cmap_name)
+            self._plot_series(axs_grid, dataset_dirs, field_name, cmap_name=cmap_name)
             self._style_axes(axs_grid, comp_labels)
-            self._add_series_colorbar(axs_grid, num_snapshots=len(dataset_dirs_sub), cmap_name=cmap_name)
+            self._add_series_colorbar(axs_grid, num_snapshots=len(dataset_dirs), cmap_name=cmap_name)
             self._save(fig, fig_name=fig_name)
 
     def _load_vfield(
         self,
         ds,
-        field: str,
+        field_name: str,
     ):
-        specs = self.VALID_FIELDS[field]
-        loader_name = specs["loader"]
+        field_meta = self.VALID_FIELDS[field_name]
+        loader_name = field_meta["loader"]
         loader_fn = getattr(ds, loader_name)
         return loader_fn()
 
@@ -165,37 +164,45 @@ class Plotter:
         self,
         axs_grid,
         dataset_dir: Path,
-        field: str,
+        field_name: str,
         color: str | tuple[float, float, float, float] = "black",
     ) -> None:
-        ## single snapshot: one colored profile per subplot
         with load_dataset.QuokkaDataset(dataset_dir=dataset_dir) as ds:
-            vfield = self._load_vfield(ds, field)
+            vfield = self._load_vfield(ds, field_name)
             domain = ds.load_domain()
         for row_index, comp_name in enumerate(self.comp_names):
             comp_index = self.comp_to_idx[comp_name]
-            comp_data = vfield.data[comp_index]
             for col_index, axis in enumerate(self.axes):
                 ax = axs_grid[row_index][col_index]
-                _plot_profile_along_axis(ax, comp_data, domain, axis, color=color)
+                _plot_profile_along_axis(
+                    ax=ax,
+                    sfield=vfield.data[comp_index],
+                    domain=domain,
+                    axis=axis,
+                    color=color,
+                )
 
     def _plot_series(
         self,
         axs_grid,
         dataset_dirs: list[Path],
-        field: str,
+        field_name: str,
         cmap_name: str,
     ) -> None:
-        ## multiple snapshots: time-coloured centerlines with shared colorbar
         cmap, norm = add_color.create_cmap(
             cmap_name=cmap_name,
             cmin=0.25,
             vmin=0,
-            vmax=len(dataset_dirs) - 1,
+            vmax=len(dataset_dirs)-1,
         )
         for t_index, dataset_dir in enumerate(dataset_dirs):
             color = cmap(norm(t_index))
-            self._plot_snapshot(axs_grid=axs_grid, dataset_dir=dataset_dir, field=field, color=color)
+            self._plot_snapshot(
+                axs_grid=axs_grid,
+                dataset_dir=dataset_dir,
+                field_name=field_name,
+                color=color,
+            )
 
     def _add_series_colorbar(
         self,
@@ -203,7 +210,7 @@ class Plotter:
         num_snapshots: int,
         cmap_name: str,
     ) -> None:
-        ## attach colorbar on the bottom-right axes for series plots
+        ## attach colorbar to the bottom-right axes for series plots
         cmap, norm = add_color.create_cmap(
             cmap_name=cmap_name,
             cmin=0.25,
@@ -224,7 +231,6 @@ class Plotter:
         axs_grid,
         comp_labels: dict[str, str],
     ) -> None:
-        ## apply titles, labels, and hide interior tick labels
         for row_index, comp in enumerate(self.comp_names):
             for col_index, axis in enumerate(self.axes):
                 ax = axs_grid[row_index][col_index]
