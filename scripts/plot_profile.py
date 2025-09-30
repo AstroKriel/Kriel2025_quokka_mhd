@@ -1,3 +1,5 @@
+## { SCRIPT
+
 ##
 ## === DEPENDENCIES
 ##
@@ -138,7 +140,7 @@ def load_field_profiles(
         if isinstance(field, field_types.VectorField):
             if len(plot_args.components_to_plot) == 0:
                 raise ValueError(
-                    f"Vector field '{plot_args.field_name}' requires at least one component via -c"
+                    f"Vector field '{plot_args.field_name}' requires at least one component via -c",
                 )
             comp_names = tuple(plot_args.components_to_plot)
             comp_labels = [field.labels[LOOKUP_AXIS_INDEX[comp_name]] for comp_name in comp_names]
@@ -361,3 +363,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+## } SCRIPT
