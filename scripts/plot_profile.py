@@ -21,10 +21,10 @@ LOOKUP_AXIS_INDEX: dict[Axis, int] = {"x": 0, "y": 1, "z": 2}
 
 
 @dataclass(frozen=True)
-class Task:
+class PlotArgs:
     fig_dir: Path
-    field_name: str
     dataset_dirs: list[Path]
+    field_name: str
     components_to_plot: tuple[Axis, ...]
     axes_to_slice: tuple[Axis, ...]
     loader_name: str
@@ -33,12 +33,12 @@ class Task:
 
 
 @dataclass(frozen=True)
-class FieldProfile:
+class ProfileData:
     sim_time: float
+    x_positions: numpy.ndarray
     ## for scalars: y_profile.shape == (num_axes,)
     ## for vectors: y_profile.shape == (num_axes, num_comps)
     y_profile: numpy.ndarray
-    x_positions: numpy.ndarray
     num_axes: int
     num_comps: int
     axes_labels: tuple[str, ...]
@@ -122,23 +122,25 @@ def _style_axes(
 
 
 def load_field_profiles(
-    task: Task,
-) -> list[FieldProfile]:
-    field_profiles: list[FieldProfile] = []
-    for dataset_dir in task.dataset_dirs:
+    plot_args: PlotArgs,
+) -> list[ProfileData]:
+    field_profiles: list[ProfileData] = []
+    for dataset_dir in plot_args.dataset_dirs:
         with load_dataset.QuokkaDataset(dataset_dir=dataset_dir, verbose=False) as ds:
             domain = ds.load_domain()
-            loader = getattr(ds, task.loader_name)
+            loader = getattr(ds, plot_args.loader_name)
             field = loader()
         sim_time = field.sim_time
-        axes_names = tuple(task.axes_to_slice)
+        axes_names = tuple(plot_args.axes_to_slice)
         x_positions = numpy.empty((len(axes_names), ), dtype=object)
         for axis_index, axis_name in enumerate(axes_names):
             x_positions[axis_index] = _compute_centers(domain, axis_name)
         if isinstance(field, field_types.VectorField):
-            if len(task.components_to_plot) == 0:
-                raise ValueError(f"Vector field '{task.field_name}' requires at least one component via -c")
-            comp_names = tuple(task.components_to_plot)
+            if len(plot_args.components_to_plot) == 0:
+                raise ValueError(
+                    f"Vector field '{plot_args.field_name}' requires at least one component via -c"
+                )
+            comp_names = tuple(plot_args.components_to_plot)
             comp_labels = [field.labels[LOOKUP_AXIS_INDEX[comp_name]] for comp_name in comp_names]
             num_axes = len(axes_names)
             num_comps = len(comp_names)
@@ -148,10 +150,10 @@ def load_field_profiles(
                     field_data = field.data[LOOKUP_AXIS_INDEX[comp_name]]
                     profile_data[axis_index, comp_index] = _extract_profile(field_data, axis_name)
             field_profiles.append(
-                FieldProfile(
+                ProfileData(
                     sim_time=sim_time,
-                    y_profile=profile_data,
                     x_positions=x_positions,
+                    y_profile=profile_data,
                     num_axes=num_axes,
                     num_comps=num_comps,
                     axes_labels=axes_names,
@@ -164,10 +166,10 @@ def load_field_profiles(
             for axis_index, axis_name in enumerate(axes_names):
                 profile_data[axis_index] = _extract_profile(field.data, axis_name)
             field_profiles.append(
-                FieldProfile(
+                ProfileData(
                     sim_time=sim_time,
-                    y_profile=profile_data,
                     x_positions=x_positions,
+                    y_profile=profile_data,
                     num_axes=num_axes,
                     num_comps=1,
                     axes_labels=axes_names,
@@ -175,8 +177,8 @@ def load_field_profiles(
                 ),
             )
         else:
-            raise ValueError(f"{task.field_name} is an unrecognised field type.")
-    field_profiles.sort(key=lambda profile: profile.sim_time)
+            raise ValueError(f"{plot_args.field_name} is an unrecognised field type.")
+    field_profiles.sort(key=lambda field_profile: field_profile.sim_time)
     return field_profiles
 
 
@@ -188,23 +190,23 @@ def load_field_profiles(
 def _plot_snapshot(
     *,
     axs_grid,
-    profile: FieldProfile,
+    field_profile: ProfileData,
     color,
 ) -> None:
     ## rows = components (or a single row for scalars)
     ## cols = axes along which profiles were extracted
-    for comp_index in range(profile.num_comps):
-        for axis_index in range(profile.num_axes):
+    for comp_index in range(field_profile.num_comps):
+        for axis_index in range(field_profile.num_axes):
             ax = axs_grid[comp_index][axis_index]
-            x = profile.x_positions[axis_index]
-            y = profile.get(axis_index=axis_index, comp_index=comp_index)
+            x = field_profile.x_positions[axis_index]
+            y = field_profile.get(axis_index=axis_index, comp_index=comp_index)
             ax.plot(x, y, lw=2.0, color=color)
 
 
 def _plot_series(
     *,
     axs_grid,
-    field_profiles: list[FieldProfile],
+    field_profiles: list[ProfileData],
     cmap_name: str,
 ) -> None:
     cmap, norm = add_color.create_cmap(
@@ -213,11 +215,11 @@ def _plot_series(
         vmin=0,
         vmax=len(field_profiles) - 1,
     )
-    for profile_index, profile in enumerate(field_profiles):
+    for profile_index, field_profile in enumerate(field_profiles):
         color = cmap(norm(profile_index))
         _plot_snapshot(
             axs_grid=axs_grid,
-            profile=profile,
+            field_profile=field_profile,
             color=color,
         )
     add_color.add_cbar_from_cmap(
@@ -230,9 +232,9 @@ def _plot_series(
 
 
 def _plot_field(
-    task: Task,
+    plot_args: PlotArgs,
 ) -> None:
-    field_profiles = load_field_profiles(task)
+    field_profiles = load_field_profiles(plot_args)
     if not field_profiles: return
     num_rows = field_profiles[0].num_comps
     num_cols = field_profiles[0].num_axes
@@ -243,22 +245,22 @@ def _plot_field(
     if len(field_profiles) == 1:
         _plot_snapshot(
             axs_grid=axs_grid,
-            profile=field_profiles[0],
+            field_profile=field_profiles[0],
             color="black",
         )
     else:
         _plot_series(
             axs_grid=axs_grid,
             field_profiles=field_profiles,
-            cmap_name=task.cmap_name,
+            cmap_name=plot_args.cmap_name,
         )
     _style_axes(
         axs_grid=axs_grid,
         comp_labels=field_profiles[0].comp_labels,
-        axes=task.axes_to_slice,
+        axes=plot_args.axes_to_slice,
     )
-    fig_path = task.fig_dir / f"{task.field_name}_profiles.png"
-    plot_manager.save_figure(fig=fig, fig_path=fig_path, verbose=task.verbose)
+    fig_path = plot_args.fig_dir / f"{plot_args.field_name}_profiles.png"
+    plot_manager.save_figure(fig=fig, fig_path=fig_path, verbose=plot_args.verbose)
 
 
 ##
@@ -323,7 +325,7 @@ class Plotter:
         fig_dir = dataset_dirs[0].parent
         for field_name in self.fields_to_plot:
             field_meta = self.VALID_FIELDS[field_name]
-            task = Task(
+            plot_args = PlotArgs(
                 fig_dir=Path(fig_dir),
                 field_name=field_name,
                 dataset_dirs=dataset_dirs,
@@ -333,7 +335,7 @@ class Plotter:
                 cmap_name=field_meta["cmap"],
                 verbose=self.verbose,
             )
-            _plot_field(task)
+            _plot_field(plot_args)
 
 
 ##
