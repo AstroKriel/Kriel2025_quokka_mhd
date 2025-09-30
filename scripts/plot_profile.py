@@ -1,14 +1,60 @@
-## { SCRIPT
-
 ##
 ## === DEPENDENCIES
 ##
 
 import numpy
+from typing import Literal
 from pathlib import Path
+from dataclasses import dataclass
 from jormi.ww_plots import plot_manager, add_color
+from jormi.ww_fields import field_types
 from ww_quokka_sims.sim_io import load_dataset
 from utils import helpers
+
+##
+## === DATA TYPES
+##
+
+Axis = Literal["x", "y", "z"]
+
+LOOKUP_AXIS_INDEX: dict[Axis, int] = {"x": 0, "y": 1, "z": 2}
+
+
+@dataclass(frozen=True)
+class Task:
+    fig_dir: Path
+    field_name: str
+    dataset_dirs: list[Path]
+    components_to_plot: tuple[Axis, ...]
+    axes_to_slice: tuple[Axis, ...]
+    loader_name: str
+    cmap_name: str
+    verbose: bool = False
+
+
+@dataclass(frozen=True)
+class FieldProfile:
+    sim_time: float
+    ## for scalars: y_profile.shape == (num_axes,)
+    ## for vectors: y_profile.shape == (num_axes, num_comps)
+    y_profile: numpy.ndarray
+    x_positions: numpy.ndarray
+    num_axes: int
+    num_comps: int
+    axes_labels: tuple[str, ...]
+    comp_labels: tuple[str, ...]
+
+    def get(
+        self,
+        axis_index: int,
+        comp_index: int | None = None,
+    ) -> numpy.ndarray:
+        if self.num_comps == 1:
+            return self.y_profile[axis_index]
+        if comp_index is None:
+            raise ValueError("comp_index is required for vector fields")
+        return self.y_profile[axis_index, comp_index]
+
 
 ##
 ## === HELPERS
@@ -17,52 +63,206 @@ from utils import helpers
 
 def _compute_centers(
     domain,
-    axis: str,
-):
-    ## return 1-D cell-center coordinates along chosen domain-axis
-    (x0, x1), (y0, y1), (z0, z1) = domain.domain_bounds
-    nx, ny, nz = domain.resolution
-    if axis == "x":
-        dx = (x1 - x0) / nx
-        return x0 + (numpy.arange(nx) + 0.5) * dx
-    if axis == "y":
-        dy = (y1 - y0) / ny
-        return y0 + (numpy.arange(ny) + 0.5) * dy
-    if axis == "z":
-        dz = (z1 - z0) / nz
-        return z0 + (numpy.arange(nz) + 0.5) * dz
-    raise ValueError("axis must be one of: 'x', 'y', 'z'")
+    axis: Axis,
+) -> numpy.ndarray:
+    (x_min, _), (y_min, _), (z_min, _) = domain.domain_bounds
+    num_cells_x, num_cells_y, num_cells_z = domain.resolution
+    cell_width_x, cell_width_y, cell_width_z = domain.cell_widths
+    if axis == "x": return x_min + (numpy.arange(num_cells_x) + 0.5) * cell_width_x
+    if axis == "y": return y_min + (numpy.arange(num_cells_y) + 0.5) * cell_width_y
+    if axis == "z": return z_min + (numpy.arange(num_cells_z) + 0.5) * cell_width_z
+    raise ValueError("axis must be one of: x, y, z")
 
 
 def _extract_profile(
     sfield: numpy.ndarray,
-    axis: str,
-):
-    ## extract 1-D profile along axis through the middle of the other two axes
-    nx, ny, nz = sfield.shape
-    slice_index_x = nx // 2
-    slice_index_y = ny // 2
-    slice_index_z = nz // 2
+    axis: Axis,
+) -> numpy.ndarray:
+    num_cells_x, num_cells_y, num_cells_z = sfield.shape
+    slice_index_x = num_cells_x // 2
+    slice_index_y = num_cells_y // 2
+    slice_index_z = num_cells_z // 2
     if axis == "x": return sfield[:, slice_index_y, slice_index_z]
     if axis == "y": return sfield[slice_index_x, :, slice_index_z]
     if axis == "z": return sfield[slice_index_x, slice_index_y, :]
-    raise ValueError("axis must be one of: 'x', 'y', 'z'")
+    raise ValueError("axis must be one of: x, y, z")
 
 
-def _plot_profile_along_axis(
-    ax,
-    sfield: numpy.ndarray,
-    domain,
-    axis: str,
-    color,
+def _create_axes_grid(
+    num_rows: int,
+    num_cols: int,
 ):
-    x_centers = _compute_centers(domain, axis)
-    y_profile = _extract_profile(sfield, axis)
-    ax.plot(x_centers, y_profile, lw=2.0, color=color)
+    fig, axs = plot_manager.create_figure(
+        num_rows=num_rows,
+        num_cols=num_cols,
+        share_x=False,
+        y_spacing=0.25,
+        x_spacing=0.25,
+    )
+    axs_grid = helpers.get_axs_grid(axs, num_rows, num_cols)
+    return fig, axs_grid
+
+
+def _style_axes(
+    axs_grid,
+    comp_labels: tuple[str, ...],
+    axes: tuple[Axis, ...],
+) -> None:
+    for comp_index in range(len(axs_grid)):
+        for axis_index, axis in enumerate(axes):
+            ax = axs_grid[comp_index][axis_index]
+            if axis_index == 0:
+                ax.set_ylabel(comp_labels[comp_index])
+            ax.set_xlabel(axis)
 
 
 ##
-## === OPERATOR CLASS
+## === LOAD DATASETS
+##
+
+
+def load_field_profiles(
+    task: Task,
+) -> list[FieldProfile]:
+    field_profiles: list[FieldProfile] = []
+    for dataset_dir in task.dataset_dirs:
+        with load_dataset.QuokkaDataset(dataset_dir=dataset_dir, verbose=False) as ds:
+            domain = ds.load_domain()
+            loader = getattr(ds, task.loader_name)
+            field = loader()
+        sim_time = field.sim_time
+        axes_names = tuple(task.axes_to_slice)
+        x_positions = numpy.empty((len(axes_names), ), dtype=object)
+        for axis_index, axis_name in enumerate(axes_names):
+            x_positions[axis_index] = _compute_centers(domain, axis_name)
+        if isinstance(field, field_types.VectorField):
+            if len(task.components_to_plot) == 0:
+                raise ValueError(f"Vector field '{task.field_name}' requires at least one component via -c")
+            comp_names = tuple(task.components_to_plot)
+            comp_labels = [field.labels[LOOKUP_AXIS_INDEX[comp_name]] for comp_name in comp_names]
+            num_axes = len(axes_names)
+            num_comps = len(comp_names)
+            profile_data = numpy.empty((num_axes, num_comps), dtype=object)
+            for axis_index, axis_name in enumerate(axes_names):
+                for comp_index, comp_name in enumerate(comp_names):
+                    field_data = field.data[LOOKUP_AXIS_INDEX[comp_name]]
+                    profile_data[axis_index, comp_index] = _extract_profile(field_data, axis_name)
+            field_profiles.append(
+                FieldProfile(
+                    sim_time=sim_time,
+                    y_profile=profile_data,
+                    x_positions=x_positions,
+                    num_axes=num_axes,
+                    num_comps=num_comps,
+                    axes_labels=axes_names,
+                    comp_labels=tuple(comp_labels),
+                ),
+            )
+        elif isinstance(field, field_types.ScalarField):
+            num_axes = len(axes_names)
+            profile_data = numpy.empty((num_axes, ), dtype=object)
+            for axis_index, axis_name in enumerate(axes_names):
+                profile_data[axis_index] = _extract_profile(field.data, axis_name)
+            field_profiles.append(
+                FieldProfile(
+                    sim_time=sim_time,
+                    y_profile=profile_data,
+                    x_positions=x_positions,
+                    num_axes=num_axes,
+                    num_comps=1,
+                    axes_labels=axes_names,
+                    comp_labels=(field.label, ),
+                ),
+            )
+        else:
+            raise ValueError(f"{task.field_name} is an unrecognised field type.")
+    field_profiles.sort(key=lambda profile: profile.sim_time)
+    return field_profiles
+
+
+##
+## === PLOTTING
+##
+
+
+def _plot_snapshot(
+    *,
+    axs_grid,
+    profile: FieldProfile,
+    color,
+) -> None:
+    ## rows = components (or a single row for scalars)
+    ## cols = axes along which profiles were extracted
+    for comp_index in range(profile.num_comps):
+        for axis_index in range(profile.num_axes):
+            ax = axs_grid[comp_index][axis_index]
+            x = profile.x_positions[axis_index]
+            y = profile.get(axis_index=axis_index, comp_index=comp_index)
+            ax.plot(x, y, lw=2.0, color=color)
+
+
+def _plot_series(
+    *,
+    axs_grid,
+    field_profiles: list[FieldProfile],
+    cmap_name: str,
+) -> None:
+    cmap, norm = add_color.create_cmap(
+        cmap_name=cmap_name,
+        cmin=0.25,
+        vmin=0,
+        vmax=len(field_profiles) - 1,
+    )
+    for profile_index, profile in enumerate(field_profiles):
+        color = cmap(norm(profile_index))
+        _plot_snapshot(
+            axs_grid=axs_grid,
+            profile=profile,
+            color=color,
+        )
+    add_color.add_cbar_from_cmap(
+        ax=axs_grid[-1][-1],
+        cmap=cmap,
+        norm=norm,
+        side="right",
+        ax_percentage=0.05,
+    )
+
+
+def _plot_field(
+    task: Task,
+) -> None:
+    field_profiles = load_field_profiles(task)
+    if not field_profiles: return
+    num_rows = field_profiles[0].num_comps
+    num_cols = field_profiles[0].num_axes
+    fig, axs_grid = _create_axes_grid(
+        num_rows=num_rows if num_rows > 0 else 1,
+        num_cols=num_cols if num_cols > 0 else 1,
+    )
+    if len(field_profiles) == 1:
+        _plot_snapshot(
+            axs_grid=axs_grid,
+            profile=field_profiles[0],
+            color="black",
+        )
+    else:
+        _plot_series(
+            axs_grid=axs_grid,
+            field_profiles=field_profiles,
+            cmap_name=task.cmap_name,
+        )
+    _style_axes(
+        axs_grid=axs_grid,
+        comp_labels=field_profiles[0].comp_labels,
+        axes=task.axes_to_slice,
+    )
+    fig_path = task.fig_dir / f"{task.field_name}_profiles.png"
+    plot_manager.save_figure(fig=fig, fig_path=fig_path, verbose=task.verbose)
+
+
+##
+## === OPERATOR
 ##
 
 
@@ -71,182 +271,69 @@ class Plotter:
     VALID_FIELDS = {
         "mag": {
             "loader": "load_magnetic_vfield",
-            "labels": {
-                "x": r"$b_x$",
-                "y": r"$b_y$",
-                "z": r"$b_z$",
-            },
             "cmap": "Blues",
-            "fig_name": "b_profiles.png",
         },
         "vel": {
             "loader": "load_velocity_vfield",
-            "labels": {
-                "x": r"$v_x$",
-                "y": r"$v_y$",
-                "z": r"$v_z$",
-            },
             "cmap": "Oranges",
-            "fig_name": "v_profiles.png",
+        },
+        "rho": {
+            "loader": "load_density_sfield",
+            "cmap": "Greys",
+        },
+        "Etot": {
+            "loader": "load_total_energy_sfield",
+            "cmap": "cividis",
+        },
+        "Emag": {
+            "loader": "load_magnetic_energy_sfield",
+            "cmap": "plasma",
         },
     }
 
     def __init__(
         self,
+        *,
         input_dir: Path,
-        fields: list[str],
-        comp_names: list[str],
-        axes: list[str],
+        fields_to_plot: tuple[str],
+        components_to_plot: tuple[Axis],
+        axes_to_slice: tuple[Axis],
+        verbose: bool = True,
     ):
-        _valid_axes = {"x", "y", "z"}
-        _valid_fields = set(self.VALID_FIELDS.keys())
-        if not fields or not comp_names or not axes:
-            raise ValueError(
-                "You must provide at least one field_name (-f vel/mag), one component (-c), and one axis (-a).",
-            )
-        if not set(fields).issubset(_valid_fields):
-            raise ValueError(f"Fields must be chosen from: {sorted(_valid_fields)}.")
-        if not set(comp_names).issubset(_valid_axes) or not set(axes).issubset(_valid_axes):
-            raise ValueError("Components and axes must be chosen from: x y z.")
-        self.input_dir = input_dir
-        self.fields = list(fields)
-        self.comp_names = list(comp_names)
-        self.axes = list(axes)
-        self.comp_to_idx = {"x": 0, "y": 1, "z": 2}
+        valid_axes = {"x", "y", "z"}
+        valid_fields = set(self.VALID_FIELDS.keys())
+        if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
+            raise ValueError(f"Provide fields via -f from: {sorted(valid_fields)}")
+        if components_to_plot and not set(components_to_plot).issubset(valid_axes):
+            raise ValueError("Components (-c) must be from: x, y, z")
+        if not axes_to_slice or not set(axes_to_slice).issubset(valid_axes):
+            raise ValueError("Axes (-a) must be from: x, y, z")
+        self.input_dir = Path(input_dir)
+        self.fields_to_plot = tuple(sorted(fields_to_plot))
+        self.components_to_plot = tuple(sorted(components_to_plot))  # ignored for scalars
+        self.axes_to_slice = tuple(sorted(axes_to_slice))
+        self.verbose = bool(verbose)
 
     def run(
         self,
     ) -> None:
         dataset_dirs = helpers.resolve_dataset_dirs(self.input_dir)
-        for field_name in self.fields:
-            self._plot_field(field_name, dataset_dirs[:20])
-
-    def _plot_field(
-        self,
-        field_name,
-        dataset_dirs,
-    ):
-        field_meta = self.VALID_FIELDS[field_name]
-        comp_labels = field_meta["labels"]
-        cmap_name = field_meta["cmap"]
-        fig_name = field_meta["fig_name"]
-        num_rows = len(self.comp_names)
-        num_cols = len(self.axes)
-        fig, axs = plot_manager.create_figure(
-            num_rows=num_rows,
-            num_cols=num_cols,
-            share_x=False,
-            y_spacing=0.25,
-            x_spacing=0.25,
-        )
-        axs_grid = helpers.get_axs_grid(axs, num_rows, num_cols)
-        if len(dataset_dirs) == 1:
-            self._plot_snapshot(axs_grid, dataset_dirs[0], field_name, color="black")
-            self._style_axes(axs_grid, comp_labels)
-            self._save(fig, fig_name=fig_name)
-        else:
-            self._plot_series(axs_grid, dataset_dirs, field_name, cmap_name=cmap_name)
-            self._style_axes(axs_grid, comp_labels)
-            self._add_series_colorbar(axs_grid, num_snapshots=len(dataset_dirs), cmap_name=cmap_name)
-            self._save(fig, fig_name=fig_name)
-
-    def _load_vfield(
-        self,
-        ds,
-        field_name: str,
-    ):
-        field_meta = self.VALID_FIELDS[field_name]
-        loader_name = field_meta["loader"]
-        loader_fn = getattr(ds, loader_name)
-        return loader_fn()
-
-    def _plot_snapshot(
-        self,
-        axs_grid,
-        dataset_dir: Path,
-        field_name: str,
-        color: str | tuple[float, float, float, float] = "black",
-    ) -> None:
-        with load_dataset.QuokkaDataset(dataset_dir=dataset_dir) as ds:
-            vfield = self._load_vfield(ds, field_name)
-            domain = ds.load_domain()
-        for row_index, comp_name in enumerate(self.comp_names):
-            comp_index = self.comp_to_idx[comp_name]
-            for col_index, axis in enumerate(self.axes):
-                ax = axs_grid[row_index][col_index]
-                _plot_profile_along_axis(
-                    ax=ax,
-                    sfield=vfield.data[comp_index],
-                    domain=domain,
-                    axis=axis,
-                    color=color,
-                )
-
-    def _plot_series(
-        self,
-        axs_grid,
-        dataset_dirs: list[Path],
-        field_name: str,
-        cmap_name: str,
-    ) -> None:
-        cmap, norm = add_color.create_cmap(
-            cmap_name=cmap_name,
-            cmin=0.25,
-            vmin=0,
-            vmax=len(dataset_dirs)-1,
-        )
-        for t_index, dataset_dir in enumerate(dataset_dirs):
-            color = cmap(norm(t_index))
-            self._plot_snapshot(
-                axs_grid=axs_grid,
-                dataset_dir=dataset_dir,
+        if not dataset_dirs:
+            return
+        fig_dir = dataset_dirs[0].parent
+        for field_name in self.fields_to_plot:
+            field_meta = self.VALID_FIELDS[field_name]
+            task = Task(
+                fig_dir=Path(fig_dir),
                 field_name=field_name,
-                color=color,
+                dataset_dirs=dataset_dirs,
+                components_to_plot=self.components_to_plot,
+                axes_to_slice=self.axes_to_slice,
+                loader_name=field_meta["loader"],
+                cmap_name=field_meta["cmap"],
+                verbose=self.verbose,
             )
-
-    def _add_series_colorbar(
-        self,
-        axs_grid,
-        num_snapshots: int,
-        cmap_name: str,
-    ) -> None:
-        ## attach colorbar to the bottom-right axes for series plots
-        cmap, norm = add_color.create_cmap(
-            cmap_name=cmap_name,
-            cmin=0.25,
-            vmin=0,
-            vmax=num_snapshots - 1,
-        )
-        ax_ref = axs_grid[-1][-1]
-        add_color.add_cbar_from_cmap(
-            ax=ax_ref,
-            cmap=cmap,
-            norm=norm,
-            side="right",
-            ax_percentage=0.05,
-        )
-
-    def _style_axes(
-        self,
-        axs_grid,
-        comp_labels: dict[str, str],
-    ) -> None:
-        for row_index, comp in enumerate(self.comp_names):
-            for col_index, axis in enumerate(self.axes):
-                ax = axs_grid[row_index][col_index]
-                if col_index == 0:
-                    ax.set_ylabel(comp_labels[comp])
-        for col_index, axis in enumerate(self.axes):
-            ax = axs_grid[-1][col_index]
-            ax.set_xlabel(axis)
-
-    def _save(
-        self,
-        fig,
-        fig_name: str,
-    ) -> None:
-        fig_path = Path(self.input_dir) / fig_name
-        plot_manager.save_figure(fig=fig, fig_path=fig_path)
+            _plot_field(task)
 
 
 ##
@@ -258,9 +345,10 @@ def main():
     args = helpers.get_user_input()
     plotter = Plotter(
         input_dir=args.dir,
-        fields=args.fields,
-        comp_names=args.components,
-        axes=args.axes,
+        fields_to_plot=args.fields,
+        components_to_plot=args.components,
+        axes_to_slice=args.axes,
+        verbose=True,
     )
     plotter.run()
 
@@ -271,5 +359,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-## } SCRIPT
