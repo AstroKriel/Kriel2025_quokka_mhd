@@ -19,6 +19,7 @@ from utils import helpers
 ##
 
 Axis = Literal["x", "y", "z"]
+
 LOOKUP_AXIS_INDEX: dict[Axis, int] = {"x": 0, "y": 1, "z": 2}
 
 
