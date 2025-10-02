@@ -6,23 +6,31 @@
 
 import argparse
 from pathlib import Path
+from jormi.ww_plots import plot_manager
 
 ##
 ## === FUNCTIONS
 ##
 
 
-def get_axs_grid(axs, num_rows, num_cols):
-    ## normalise axis for 2D indexing [row, col]
-    if (num_rows == 1) and (num_cols == 1):
-        axs_grid = [[axs]]
-    elif num_rows == 1:
-        axs_grid = [list(axs)]
-    elif num_cols == 1:
-        axs_grid = [[ax] for ax in axs]
-    else:
-        axs_grid = axs
-    return axs_grid
+def create_axes_grid(
+    num_rows: int,
+    num_cols: int,
+    add_cbar_space: bool = False
+):
+    fig, axs = plot_manager.create_figure(
+        num_rows=num_rows,
+        num_cols=num_cols,
+        share_x=False,
+        y_spacing=0.25,
+        x_spacing=0.75 if add_cbar_space else 0.25,
+    )
+    axs_grid = plot_manager.get_axs_grid(
+        axs=axs,
+        num_rows=num_rows,
+        num_cols=num_cols,
+    )
+    return fig, axs_grid
 
 
 def get_user_input():
@@ -79,18 +87,6 @@ def resolve_dataset_dirs(
     dataset_dirs = get_latest_dataset_dirs(sim_dir=input_dir)
     assert len(dataset_dirs) != 0
     return dataset_dirs
-
-
-def subsample_dirs(
-    dataset_dirs,
-    target_max: int = 10,
-):
-    num_dirs = len(dataset_dirs)
-    if num_dirs <= target_max:
-        return dataset_dirs
-    stride_ratio = (num_dirs - 1) // (target_max - 1)
-    indices_to_keep = [round(_index * stride_ratio) for _index in range(target_max)]
-    return [dataset_dirs[dir_index] for dir_index in indices_to_keep]
 
 
 ## } MODULE
