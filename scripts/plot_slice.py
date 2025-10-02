@@ -24,8 +24,8 @@ class PlotArgs:
     fig_dir: Path
     dataset_dir: Path
     field_name: str
-    components_to_plot: tuple[str, ...]
-    axes_to_slice: tuple[str, ...]
+    components_to_plot: list[str]
+    axes_to_slice: list[str]
     loader_name: str
     cmap_name: str
     verbose: bool
@@ -114,7 +114,7 @@ def _plot_slice(
         y_pos=0.5,
         x_alignment="center",
         y_alignment="center",
-        label=rf"$t = {sim_time:.2e}$",
+        label=rf"$t = {sim_time:.2f}$",
         fontsize=16,
         box_alpha=0.5,
         add_box=True,
@@ -145,22 +145,18 @@ def _plot_snapshot(
     if isinstance(field, field_types.VectorField):
         if len(plot_args.components_to_plot) == 0:
             raise ValueError(f"Vector field '{plot_args.field_name}' requires at least one component via -c")
-        for comp_name in tuple(sorted(plot_args.components_to_plot)):
+        for comp_name in sorted(plot_args.components_to_plot):
             comp_index = lookup_comp_index[comp_name]
             data_args.append((field.labels[comp_index], field.data[comp_index]))
     elif isinstance(field, field_types.ScalarField):
         data_args = [(field.label, field.data)]
     else:
         raise ValueError(f"{plot_args.field_name} is an unrecognised field type.")
-    num_rows = len(data_args)
-    num_cols = len(plot_args.axes_to_slice)
-    fig, axs = plot_manager.create_figure(
-        num_rows=num_rows,
-        num_cols=num_cols,
-        y_spacing=0.35,
-        x_spacing=0.25,
+    fig, axs_grid = helpers.create_axes_grid(
+        num_rows=len(data_args),
+        num_cols=len(plot_args.axes_to_slice),
+        add_cbar_space=True
     )
-    axs_grid = helpers.get_axs_grid(axs, num_rows, num_cols)
     for row_index, (data_label, data_array) in enumerate(data_args):
         for col_index, axis_to_slice in enumerate(plot_args.axes_to_slice):
             ax = axs_grid[row_index][col_index]
@@ -173,16 +169,24 @@ def _plot_snapshot(
                 label=data_label,
                 cmap_name=plot_args.cmap_name,
             )
-    for row_index in range(len(axs_grid)):
+    num_rows = len(axs_grid)
+    for row_index in range(num_rows):
         for col_index, axis_to_slice in enumerate(plot_args.axes_to_slice):
             ax = axs_grid[row_index][col_index]
             xlabel, ylabel = _get_slice_labels(axis_to_slice)
-            ax.set_xlabel(xlabel)
+            if num_rows == 1:
+                ax.set_xlabel(xlabel)
+            elif num_rows > 1 and row_index == num_rows-1:
+                ax.set_xlabel(xlabel)
             ax.set_ylabel(ylabel)
     index_label = plot_args.dataset_dir.name.split("plt")[1]
     fig_name = f"{plot_args.field_name}_slice_{index_label}.png"
     fig_path = plot_args.fig_dir / fig_name
-    plot_manager.save_figure(fig=fig, fig_path=fig_path, verbose=plot_args.verbose)
+    plot_manager.save_figure(
+        fig=fig,
+        fig_path=fig_path,
+        verbose=plot_args.verbose,
+    )
 
 
 ##
@@ -193,6 +197,10 @@ def _plot_snapshot(
 class Plotter:
 
     VALID_FIELDS = {
+        "divb": {
+            "loader": "load_div_b_sfield",
+            "cmap": "bwr",
+        },
         "mag": {
             "loader": "load_magnetic_vfield",
             "cmap": "Blues",
@@ -224,18 +232,21 @@ class Plotter:
         axes_to_slice: list[str],
         use_parallel: bool = True,
     ):
-        valid_axes = {"x", "y", "z"}
         valid_fields = set(self.VALID_FIELDS.keys())
         if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
             raise ValueError(f"Provide one or more field to plot (via -f) from: {sorted(valid_fields)}")
-        if components_to_plot and not set(components_to_plot).issubset(valid_axes):
+        valid_axes = {"x", "y", "z"}
+        ## default to all components/axes (if not provided)
+        if not components_to_plot: components_to_plot = ["x", "y", "z"]
+        elif not set(components_to_plot).issubset(valid_axes):
             raise ValueError("Provide one or more components (via -c) from: x, y, z")
-        if not axes_to_slice or not set(axes_to_slice).issubset(valid_axes):
+        if not axes_to_slice: axes_to_slice = ["x", "y", "z"]
+        elif not set(axes_to_slice).issubset(valid_axes):
             raise ValueError("Provide one or more axes (via -a) from: x, y, z")
         self.input_dir = Path(input_dir)
-        self.fields_to_plot = list(fields_to_plot)
-        self.components_to_plot = list(components_to_plot)
-        self.axes_to_slice = list(axes_to_slice)
+        self.fields_to_plot = fields_to_plot
+        self.components_to_plot = components_to_plot
+        self.axes_to_slice = axes_to_slice
         self.use_parallel = bool(use_parallel)
 
     def run(self) -> None:
@@ -252,8 +263,8 @@ class Plotter:
                         fig_dir=Path(fig_dir),
                         dataset_dir=Path(dataset_dir),
                         field_name=field_name,
-                        components_to_plot=tuple(self.components_to_plot),
-                        axes_to_slice=tuple(self.axes_to_slice),
+                        components_to_plot=self.components_to_plot,
+                        axes_to_slice=self.axes_to_slice,
                         loader_name=loader_name,
                         cmap_name=cmap_name,
                         verbose=False,

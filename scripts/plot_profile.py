@@ -27,8 +27,8 @@ class PlotArgs:
     fig_dir: Path
     dataset_dirs: list[Path]
     field_name: str
-    components_to_plot: tuple[Axis, ...]
-    axes_to_slice: tuple[Axis, ...]
+    components_to_plot: list[Axis]
+    axes_to_slice: list[Axis]
     loader_name: str
     cmap_name: str
     verbose: bool = False
@@ -41,10 +41,8 @@ class ProfileData:
     ## for scalars: y_profile.shape == (num_axes,)
     ## for vectors: y_profile.shape == (num_axes, num_comps)
     y_profile: numpy.ndarray
-    num_axes: int
-    num_comps: int
-    axes_labels: tuple[str, ...]
-    comp_labels: tuple[str, ...]
+    axes_labels: list[Axis]
+    comp_labels: list[str]
 
     def get(
         self,
@@ -56,6 +54,18 @@ class ProfileData:
         if comp_index is None:
             raise ValueError("comp_index is required for vector fields")
         return self.y_profile[axis_index, comp_index]
+    
+    @property
+    def num_axes(
+        self,
+    ) -> int:
+        return len(self.axes_labels)
+
+    @property
+    def num_comps(
+        self,
+    ) -> int:
+        return len(self.comp_labels)
 
 
 ##
@@ -90,25 +100,10 @@ def _extract_profile(
     raise ValueError("axis must be one of: x, y, z")
 
 
-def _create_axes_grid(
-    num_rows: int,
-    num_cols: int,
-):
-    fig, axs = plot_manager.create_figure(
-        num_rows=num_rows,
-        num_cols=num_cols,
-        share_x=False,
-        y_spacing=0.25,
-        x_spacing=0.25,
-    )
-    axs_grid = helpers.get_axs_grid(axs, num_rows, num_cols)
-    return fig, axs_grid
-
-
 def _style_axes(
     axs_grid,
-    comp_labels: tuple[str, ...],
-    axes: tuple[Axis, ...],
+    comp_labels: list[str],
+    axes: list[Axis],
 ) -> None:
     for comp_index in range(len(axs_grid)):
         for axis_index, axis in enumerate(axes):
@@ -133,7 +128,7 @@ def load_field_profiles(
             loader = getattr(ds, plot_args.loader_name)
             field = loader()
         sim_time = field.sim_time
-        axes_names = tuple(plot_args.axes_to_slice)
+        axes_names = sorted(plot_args.axes_to_slice)
         x_positions = numpy.empty((len(axes_names), ), dtype=object)
         for axis_index, axis_name in enumerate(axes_names):
             x_positions[axis_index] = _compute_centers(domain, axis_name)
@@ -142,11 +137,9 @@ def load_field_profiles(
                 raise ValueError(
                     f"Vector field '{plot_args.field_name}' requires at least one component via -c",
                 )
-            comp_names = tuple(plot_args.components_to_plot)
+            comp_names = sorted(plot_args.components_to_plot)
             comp_labels = [field.labels[LOOKUP_AXIS_INDEX[comp_name]] for comp_name in comp_names]
-            num_axes = len(axes_names)
-            num_comps = len(comp_names)
-            profile_data = numpy.empty((num_axes, num_comps), dtype=object)
+            profile_data = numpy.empty((len(axes_names), len(comp_names)), dtype=object)
             for axis_index, axis_name in enumerate(axes_names):
                 for comp_index, comp_name in enumerate(comp_names):
                     field_data = field.data[LOOKUP_AXIS_INDEX[comp_name]]
@@ -156,15 +149,12 @@ def load_field_profiles(
                     sim_time=sim_time,
                     x_positions=x_positions,
                     y_profile=profile_data,
-                    num_axes=num_axes,
-                    num_comps=num_comps,
                     axes_labels=axes_names,
-                    comp_labels=tuple(comp_labels),
+                    comp_labels=comp_labels,
                 ),
             )
         elif isinstance(field, field_types.ScalarField):
-            num_axes = len(axes_names)
-            profile_data = numpy.empty((num_axes, ), dtype=object)
+            profile_data = numpy.empty((len(axes_names), ), dtype=object)
             for axis_index, axis_name in enumerate(axes_names):
                 profile_data[axis_index] = _extract_profile(field.data, axis_name)
             field_profiles.append(
@@ -172,10 +162,8 @@ def load_field_profiles(
                     sim_time=sim_time,
                     x_positions=x_positions,
                     y_profile=profile_data,
-                    num_axes=num_axes,
-                    num_comps=1,
                     axes_labels=axes_names,
-                    comp_labels=(field.label, ),
+                    comp_labels=[field.label],
                 ),
             )
         else:
@@ -226,6 +214,7 @@ def _plot_series(
         )
     add_color.add_cbar_from_cmap(
         ax=axs_grid[-1][-1],
+        label=r"dump index",
         cmap=cmap,
         norm=norm,
         side="right",
@@ -238,11 +227,9 @@ def _plot_field(
 ) -> None:
     field_profiles = load_field_profiles(plot_args)
     if not field_profiles: return
-    num_rows = field_profiles[0].num_comps
-    num_cols = field_profiles[0].num_axes
-    fig, axs_grid = _create_axes_grid(
-        num_rows=num_rows if num_rows > 0 else 1,
-        num_cols=num_cols if num_cols > 0 else 1,
+    fig, axs_grid = helpers.create_axes_grid(
+        num_rows=field_profiles[0].num_comps,
+        num_cols=field_profiles[0].num_axes,
     )
     if len(field_profiles) == 1:
         _plot_snapshot(
@@ -262,7 +249,11 @@ def _plot_field(
         axes=plot_args.axes_to_slice,
     )
     fig_path = plot_args.fig_dir / f"{plot_args.field_name}_profiles.png"
-    plot_manager.save_figure(fig=fig, fig_path=fig_path, verbose=plot_args.verbose)
+    plot_manager.save_figure(
+        fig=fig,
+        fig_path=fig_path,
+        verbose=plot_args.verbose,
+    )
 
 
 ##
@@ -299,23 +290,26 @@ class Plotter:
         self,
         *,
         input_dir: Path,
-        fields_to_plot: tuple[str],
-        components_to_plot: tuple[Axis],
-        axes_to_slice: tuple[Axis],
+        fields_to_plot: list[str],
+        components_to_plot: list[Axis],
+        axes_to_slice: list[Axis],
         verbose: bool = True,
     ):
-        valid_axes = {"x", "y", "z"}
         valid_fields = set(self.VALID_FIELDS.keys())
         if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
             raise ValueError(f"Provide fields via -f from: {sorted(valid_fields)}")
-        if components_to_plot and not set(components_to_plot).issubset(valid_axes):
-            raise ValueError("Components (-c) must be from: x, y, z")
-        if not axes_to_slice or not set(axes_to_slice).issubset(valid_axes):
-            raise ValueError("Axes (-a) must be from: x, y, z")
+        valid_axes = {"x", "y", "z"}
+        ## default to all components/axes (if not provided)
+        if not components_to_plot: components_to_plot = ["x", "y", "z"]
+        elif not set(components_to_plot).issubset(valid_axes):
+            raise ValueError("Provide one or more components (via -c) from: x, y, z")
+        if not axes_to_slice: axes_to_slice = ["x", "y", "z"]
+        elif not set(axes_to_slice).issubset(valid_axes):
+            raise ValueError("Provide one or more axes (via -a) from: x, y, z")
         self.input_dir = Path(input_dir)
-        self.fields_to_plot = tuple(sorted(fields_to_plot))
-        self.components_to_plot = tuple(sorted(components_to_plot))  # ignored for scalars
-        self.axes_to_slice = tuple(sorted(axes_to_slice))
+        self.fields_to_plot = fields_to_plot
+        self.components_to_plot = components_to_plot  # ignored for scalars
+        self.axes_to_slice = axes_to_slice
         self.verbose = bool(verbose)
 
     def run(

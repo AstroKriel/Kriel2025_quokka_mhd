@@ -28,7 +28,7 @@ class PlotArgs:
     fig_dir: Path
     dataset_dirs: list[Path]
     field_name: str
-    components_to_plot: tuple[Axis, ...]
+    components_to_plot: list[Axis]
     loader_name: str
     cmap_name: str
     num_bins: int = 15
@@ -40,8 +40,7 @@ class PDFData:
     sim_time: float
     grouped_bin_centers: numpy.ndarray
     grouped_densities: numpy.ndarray
-    num_comps: int
-    comp_labels: tuple[str, ...]
+    comp_labels: list[str]
 
     def get_pdf(
         self,
@@ -52,6 +51,11 @@ class PDFData:
             self.grouped_densities[comp_index],
         )
 
+    @property
+    def num_comps(
+        self,
+    ) -> int:
+        return len(self.comp_labels)
 
 ##
 ## === HELPERS
@@ -69,24 +73,9 @@ def _estimate_pdf(
     return pdf.bin_centers, pdf.density
 
 
-def _create_axes_grid(
-    num_rows: int,
-    num_cols: int,
-):
-    fig, axs = plot_manager.create_figure(
-        num_rows=num_rows,
-        num_cols=num_cols,
-        share_x=False,
-        y_spacing=0.25,
-        x_spacing=0.25,
-    )
-    axs_grid = helpers.get_axs_grid(axs, num_rows, num_cols)
-    return fig, axs_grid
-
-
 def _style_axes(
     axs_grid,
-    comp_labels: tuple[str, ...],
+    comp_labels: list[str],
 ) -> None:
     for comp_index in range(len(comp_labels)):
         ax = axs_grid[0][comp_index]
@@ -113,8 +102,8 @@ def load_field_pdfs(
                 raise ValueError(
                     f"Vector field '{plot_args.field_name}' requires at least one component via -c",
                 )
-            comp_names = tuple(plot_args.components_to_plot)
-            comp_labels = tuple(field.labels[LOOKUP_AXIS_INDEX[comp_name]] for comp_name in comp_names)
+            comp_names = sorted(plot_args.components_to_plot)
+            comp_labels = [field.labels[LOOKUP_AXIS_INDEX[comp_name]] for comp_name in comp_names]
             grouped_bin_centers = numpy.empty((len(comp_names), ), dtype=object)
             grouped_densities = numpy.empty((len(comp_names), ), dtype=object)
             for comp_index, comp_name in enumerate(comp_names):
@@ -130,8 +119,7 @@ def load_field_pdfs(
                     sim_time=sim_time,
                     grouped_bin_centers=grouped_bin_centers,
                     grouped_densities=grouped_densities,
-                    num_comps=len(comp_names),
-                    comp_labels=tuple(comp_labels),
+                    comp_labels=comp_labels,
                 ),
             )
         elif isinstance(field, field_types.ScalarField):
@@ -146,8 +134,7 @@ def load_field_pdfs(
                     sim_time=sim_time,
                     grouped_bin_centers=grouped_bin_centers,
                     grouped_densities=grouped_densities,
-                    num_comps=1,
-                    comp_labels=(field.label, ),
+                    comp_labels=[field.label],
                 ),
             )
         else:
@@ -204,6 +191,7 @@ def _plot_series(
         )
     add_color.add_cbar_from_cmap(
         ax=axs_grid[-1][-1],
+        label=r"dump index",
         cmap=cmap,
         norm=norm,
         side="right",
@@ -217,7 +205,7 @@ def _plot_field(
     field_pdfs = load_field_pdfs(plot_args)
     if not field_pdfs: return
     num_cols = field_pdfs[0].num_comps
-    fig, axs_grid = _create_axes_grid(
+    fig, axs_grid = helpers.create_axes_grid(
         num_rows=1,
         num_cols=num_cols,
     )
@@ -238,7 +226,11 @@ def _plot_field(
         comp_labels=field_pdfs[0].comp_labels,
     )
     fig_path = plot_args.fig_dir / f"{plot_args.field_name}_pdfs.png"
-    plot_manager.save_figure(fig=fig, fig_path=fig_path, verbose=plot_args.verbose)
+    plot_manager.save_figure(
+        fig=fig,
+        fig_path=fig_path,
+        verbose=plot_args.verbose,
+    )
 
 
 ##
@@ -249,6 +241,10 @@ def _plot_field(
 class Plotter:
 
     VALID_FIELDS = {
+        "divb": {
+            "loader": "load_div_b_sfield",
+            "cmap": "Blues",
+        },
         "mag": {
             "loader": "load_magnetic_vfield",
             "cmap": "Blues",
@@ -275,8 +271,8 @@ class Plotter:
         self,
         *,
         input_dir: Path,
-        fields_to_plot: tuple[str],
-        components_to_plot: tuple[Axis],
+        fields_to_plot: list[str],
+        components_to_plot: list[Axis],
         verbose: bool = True,
         num_bins: int = 15,
     ):
@@ -284,11 +280,13 @@ class Plotter:
         if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
             raise ValueError(f"Provide fields via -f from: {sorted(valid_fields)}")
         valid_axes = {"x", "y", "z"}
-        if components_to_plot and not set(components_to_plot).issubset(valid_axes):
-            raise ValueError("Components (-c) must be from: x, y, z")
+        ## default to all components (if not provided)
+        if not components_to_plot: components_to_plot = ["x", "y", "z"]
+        elif not set(components_to_plot).issubset(valid_axes):
+            raise ValueError("Provide one or more components (via -c) from: x, y, z")
         self.input_dir = Path(input_dir)
-        self.fields_to_plot = tuple(sorted(fields_to_plot))
-        self.components_to_plot = tuple(sorted(components_to_plot))  # ignored for scalars
+        self.fields_to_plot = fields_to_plot
+        self.components_to_plot = components_to_plot  # ignored for scalars
         self.verbose = bool(verbose)
         self.num_bins = int(num_bins)
 
