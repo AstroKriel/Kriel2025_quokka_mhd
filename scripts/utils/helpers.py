@@ -63,6 +63,12 @@ def get_user_input():
         default=None,
         help="Optional list of axes to plot.",
     )
+    parser.add_argument(
+        "--animate-only",
+        action="store_true",
+        default=False,
+        help="Skip to animation if provided (default: False).",
+    )
     args = parser.parse_args()
     return args
 
