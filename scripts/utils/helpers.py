@@ -16,7 +16,7 @@ from jormi.ww_plots import plot_manager
 def create_axes_grid(
     num_rows: int,
     num_cols: int,
-    add_cbar_space: bool = False
+    add_cbar_space: bool = False,
 ):
     fig, axs = plot_manager.create_figure(
         num_rows=num_rows,
