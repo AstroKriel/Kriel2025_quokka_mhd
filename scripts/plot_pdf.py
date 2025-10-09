@@ -57,6 +57,7 @@ class PDFData:
     ) -> int:
         return len(self.comp_labels)
 
+
 ##
 ## === HELPERS
 ##
@@ -262,7 +263,7 @@ class Plotter:
             "cmap": "cividis",
         },
         "Emag": {
-            "loader": "load_magnetic_energy_sfield",
+            "loader": "load_magnetic_energy_density_sfield",
             "cmap": "plasma",
         },
     }

@@ -155,7 +155,7 @@ def _plot_snapshot(
     fig, axs_grid = helpers.create_axes_grid(
         num_rows=len(data_args),
         num_cols=len(plot_args.axes_to_slice),
-        add_cbar_space=True
+        add_cbar_space=True,
     )
     for row_index, (data_label, data_array) in enumerate(data_args):
         for col_index, axis_to_slice in enumerate(plot_args.axes_to_slice):
@@ -176,7 +176,7 @@ def _plot_snapshot(
             xlabel, ylabel = _get_slice_labels(axis_to_slice)
             if num_rows == 1:
                 ax.set_xlabel(xlabel)
-            elif num_rows > 1 and row_index == num_rows-1:
+            elif (num_rows > 1) and (row_index == num_rows - 1):
                 ax.set_xlabel(xlabel)
             ax.set_ylabel(ylabel)
     index_label = plot_args.dataset_dir.name.split("plt")[1]
@@ -197,10 +197,6 @@ def _plot_snapshot(
 class Plotter:
 
     VALID_FIELDS = {
-        "divb": {
-            "loader": "load_div_b_sfield",
-            "cmap": "bwr",
-        },
         "mag": {
             "loader": "load_magnetic_vfield",
             "cmap": "Blues",
@@ -213,13 +209,25 @@ class Plotter:
             "loader": "load_density_sfield",
             "cmap": "Greys",
         },
+        "Eint": {
+            "loader": "load_internal_energy_sfield",
+            "cmap": "magma",
+        },
         "Etot": {
             "loader": "load_total_energy_sfield",
             "cmap": "cividis",
         },
         "Emag": {
-            "loader": "load_magnetic_energy_sfield",
+            "loader": "load_magnetic_energy_density_sfield",
             "cmap": "plasma",
+        },
+        "pressure": {
+            "loader": "load_pressure_sfield",
+            "cmap": "Purples",
+        },
+        "divb": {
+            "loader": "load_div_b_sfield",
+            "cmap": "bwr",
         },
     }
 

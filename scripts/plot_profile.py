@@ -54,7 +54,7 @@ class ProfileData:
         if comp_index is None:
             raise ValueError("comp_index is required for vector fields")
         return self.y_profile[axis_index, comp_index]
-    
+
     @property
     def num_axes(
         self,
@@ -276,13 +276,21 @@ class Plotter:
             "loader": "load_density_sfield",
             "cmap": "Greys",
         },
+        "Eint": {
+            "loader": "load_internal_energy_sfield",
+            "cmap": "magma",
+        },
         "Etot": {
             "loader": "load_total_energy_sfield",
             "cmap": "cividis",
         },
         "Emag": {
-            "loader": "load_magnetic_energy_sfield",
+            "loader": "load_magnetic_energy_density_sfield",
             "cmap": "plasma",
+        },
+        "pressure": {
+            "loader": "load_pressure_sfield",
+            "cmap": "Purples",
         },
     }
 
