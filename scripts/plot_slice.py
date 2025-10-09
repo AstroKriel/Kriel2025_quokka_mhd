@@ -231,6 +231,7 @@ class Plotter:
         components_to_plot: list[str],
         axes_to_slice: list[str],
         use_parallel: bool = True,
+        animate_only: bool = False,
     ):
         valid_fields = set(self.VALID_FIELDS.keys())
         if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
@@ -248,39 +249,42 @@ class Plotter:
         self.components_to_plot = components_to_plot
         self.axes_to_slice = axes_to_slice
         self.use_parallel = bool(use_parallel)
+        self.animate_only = bool(animate_only)
 
     def run(self) -> None:
         dataset_dirs = helpers.resolve_dataset_dirs(self.input_dir)
+        if not dataset_dirs: return
         fig_dir = dataset_dirs[0].parent
-        grouped_args: list[PlotArgs] = []
-        for field_name in self.fields_to_plot:
-            field_meta = self.VALID_FIELDS[field_name]
-            loader_name = field_meta["loader"]
-            cmap_name = field_meta["cmap"]
-            for dataset_dir in dataset_dirs:
-                grouped_args.append(
-                    PlotArgs(
-                        fig_dir=Path(fig_dir),
-                        dataset_dir=Path(dataset_dir),
-                        field_name=field_name,
-                        components_to_plot=self.components_to_plot,
-                        axes_to_slice=self.axes_to_slice,
-                        loader_name=loader_name,
-                        cmap_name=cmap_name,
-                        verbose=False,
-                    ),
+        if not self.animate_only:
+            grouped_args: list[PlotArgs] = []
+            for field_name in self.fields_to_plot:
+                field_meta = self.VALID_FIELDS[field_name]
+                loader_name = field_meta["loader"]
+                cmap_name = field_meta["cmap"]
+                for dataset_dir in dataset_dirs:
+                    grouped_args.append(
+                        PlotArgs(
+                            fig_dir=Path(fig_dir),
+                            dataset_dir=Path(dataset_dir),
+                            field_name=field_name,
+                            components_to_plot=self.components_to_plot,
+                            axes_to_slice=self.axes_to_slice,
+                            loader_name=loader_name,
+                            cmap_name=cmap_name,
+                            verbose=False,
+                        ),
+                    )
+            if not grouped_args: return
+            if self.use_parallel and len(grouped_args) > 5:
+                parallel_utils.run_in_parallel(
+                    func=_plot_snapshot,
+                    grouped_args=grouped_args,
+                    timeout_seconds=120,
+                    show_progress=True,
+                    enable_plotting=True,
                 )
-        if not grouped_args: return
-        if self.use_parallel and len(grouped_args) > 5:
-            parallel_utils.run_in_parallel(
-                func=_plot_snapshot,
-                grouped_args=grouped_args,
-                timeout_seconds=30,
-                show_progress=True,
-                enable_plotting=True,
-            )
-        else:
-            [_plot_snapshot(plot_args) for plot_args in grouped_args]
+            else:
+                [_plot_snapshot(plot_args) for plot_args in grouped_args]
         for field_name in self.fields_to_plot:
             fig_paths = io_manager.ItemFilter(
                 prefix=f"{field_name}_slice_",
@@ -312,6 +316,7 @@ def main():
         components_to_plot=args.components,
         axes_to_slice=args.axes,
         use_parallel=True,
+        animate_only=args.animate_only,
     )
     plotter.run()
 
