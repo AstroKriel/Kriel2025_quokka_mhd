@@ -209,13 +209,17 @@ class Plotter:
             "loader": "load_density_sfield",
             "cmap": "Greys",
         },
+        "Etot": {
+            "loader": "load_total_energy_sfield",
+            "cmap": "cividis",
+        },
         "Eint": {
             "loader": "load_internal_energy_sfield",
             "cmap": "magma",
         },
-        "Etot": {
-            "loader": "load_total_energy_sfield",
-            "cmap": "cividis",
+        "Ekin": {
+            "loader": "load_kinetic_energy_sfield",
+            "cmap": "magma",
         },
         "Emag": {
             "loader": "load_magnetic_energy_density_sfield",
