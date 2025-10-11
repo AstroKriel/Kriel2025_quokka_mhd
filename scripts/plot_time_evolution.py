@@ -1,17 +1,13 @@
-#!/usr/bin/env python3
-# plot_time_evolution.py
-#
 ## { SCRIPT
+
 ##
 ## === DEPENDENCIES
 ##
 
-import numpy
 from pathlib import Path
 from dataclasses import dataclass
-from jormi.ww_io import io_manager
 from jormi.utils import parallel_utils
-from jormi.ww_plots import plot_manager, plot_data, annotate_axis
+from jormi.ww_plots import plot_manager
 from jormi.ww_fields import field_types, field_operators
 from ww_quokka_sims.sim_io import load_dataset
 from utils import helpers
@@ -25,15 +21,26 @@ from utils import helpers
 class LoaderArgs:
     dataset_dir: Path
     field_name: str
-    loader_name: str
+    field_loader: str
     verbose: bool
+
+
+@dataclass(frozen=True)
+class DataPoint:
+    sim_time: float
+    vi_quantity: float
+
+
+@dataclass(frozen=True)
+class DataSeries:
+    sim_times: list[float]
+    vi_quantities: list[float]
 
 
 @dataclass(frozen=True)
 class PlotterArgs:
     fig_dir: Path
-    time_series: list[float]
-    data_series: list[float]
+    data_series: DataSeries
     field_name: str
     color: str
     verbose: bool
@@ -46,19 +53,24 @@ class PlotterArgs:
 
 def _load_snapshot(
     loader_args: LoaderArgs,
-) -> tuple[float, float]:
+) -> DataPoint:
     with load_dataset.QuokkaDataset(dataset_dir=loader_args.dataset_dir, verbose=loader_args.verbose) as ds:
-        domain = ds.load_domain()
-        loader = getattr(ds, loader_args.loader_name)
-        field = loader()  # expect ScalarField
+        domain_details = ds.load_domain_details()
+        field_loader = getattr(ds, loader_args.field_loader)
+        field = field_loader()  # expect ScalarField
     if not isinstance(field, field_types.ScalarField):
         raise ValueError(f"{loader_args.field_name} is not a scalar field (got {type(field).__name__}).")
     sim_time = float(field.sim_time)
-    vi_quantity = field_operators.compute_sfield_volume_integral(
-        sfield=field,
-        domain=domain,
+    vi_quantity = float(
+        field_operators.compute_sfield_volume_integral(
+            sfield=field,
+            domain_details=domain_details,
+        ),
     )
-    return (sim_time, vi_quantity)
+    return DataPoint(
+        sim_time=sim_time,
+        vi_quantity=vi_quantity,
+    )
 
 
 def _plot_evolution(
@@ -66,8 +78,8 @@ def _plot_evolution(
 ) -> None:
     fig, ax = plot_manager.create_figure()
     ax.plot(
-        plotter_args.time_series,
-        plotter_args.data_series,
+        plotter_args.data_series.sim_times,
+        plotter_args.data_series.vi_quantities,
         color=plotter_args.color,
         marker="o",
         ms=6,
@@ -101,10 +113,6 @@ class Plotter:
             "loader": "load_total_energy_sfield",
             "color": "black",
         },
-        "Eint": {
-            "loader": "load_internal_energy_sfield",
-            "color": "goldenrod",
-        },
         "Ekin": {
             "loader": "load_kinetic_energy_sfield",
             "color": "darkorange",
@@ -112,6 +120,10 @@ class Plotter:
         "Emag": {
             "loader": "load_magnetic_energy_density_sfield",
             "color": "red",
+        },
+        "Eint": {
+            "loader": "load_internal_energy_sfield",
+            "color": "goldenrod",
         },
         "pressure": {
             "loader": "load_pressure_sfield",
@@ -144,19 +156,19 @@ class Plotter:
         fig_dir = dataset_dirs[0].parent
         for field_name in self.fields_to_plot:
             field_meta = self.VALID_FIELDS[field_name]
-            loader_name = field_meta["loader"]
+            field_loader = field_meta["loader"]
             color = field_meta["color"]
             grouped_loader_args: list[LoaderArgs] = [
                 LoaderArgs(
                     dataset_dir=Path(dataset_dir),
                     field_name=field_name,
-                    loader_name=loader_name,
+                    field_loader=field_loader,
                     verbose=False,
                 ) for dataset_dir in dataset_dirs
             ]
             if not grouped_loader_args: continue
             if self.use_parallel and len(grouped_loader_args) > 5:
-                results = parallel_utils.run_in_parallel(
+                data_points: list[DataPoint] = parallel_utils.run_in_parallel(
                     func=_load_snapshot,
                     grouped_args=grouped_loader_args,
                     timeout_seconds=120,
@@ -164,15 +176,16 @@ class Plotter:
                     enable_plotting=True,
                 )
             else:
-                results = [_load_snapshot(args) for args in grouped_loader_args]
-            results = sorted(results, key=lambda data_pair: data_pair[0])
-            sim_times = [sim_time for (sim_time, _) in results]
-            vi_quantities = [vi_quantity for (_, vi_quantity) in results]
+                data_points: list[DataPoint] = [_load_snapshot(args) for args in grouped_loader_args]
+            data_points = sorted(data_points, key=lambda data_point: data_point.sim_time)
+            data_series = DataSeries(
+                sim_times=[data_point.sim_time for data_point in data_points],
+                vi_quantities=[data_point.vi_quantity for data_point in data_points],
+            )
             _plot_evolution(
                 PlotterArgs(
                     fig_dir=Path(fig_dir),
-                    time_series=sim_times,
-                    data_series=vi_quantities,
+                    data_series=data_series,
                     field_name=field_name,
                     color=color,
                     verbose=True,

@@ -1,5 +1,4 @@
 ## { SCRIPT
-
 ##
 ## === DEPENDENCIES
 ##
@@ -28,8 +27,8 @@ class PlotArgs:
     fig_dir: Path
     dataset_dirs: list[Path]
     field_name: str
-    components_to_plot: list[Axis]
-    loader_name: str
+    components_to_plot: list[Axis]  # ignored for scalars
+    field_loader: str
     cmap_name: str
     num_bins: int = 15
     verbose: bool = False
@@ -81,7 +80,8 @@ def _style_axes(
     for comp_index in range(len(comp_labels)):
         ax = axs_grid[0][comp_index]
         ax.set_xlabel(comp_labels[comp_index])
-        if comp_index == 0: ax.set_ylabel(r"$p$")
+        if comp_index == 0:
+            ax.set_ylabel(r"$p$")
 
 
 ##
@@ -95,8 +95,8 @@ def load_field_pdfs(
     field_pdfs: list[PDFData] = []
     for dataset_dir in plot_args.dataset_dirs:
         with load_dataset.QuokkaDataset(dataset_dir=dataset_dir, verbose=False) as ds:
-            loader = getattr(ds, plot_args.loader_name)
-            field = loader()
+            field_loader = getattr(ds, plot_args.field_loader)
+            field = field_loader()
         sim_time = float(field.sim_time)
         if isinstance(field, field_types.VectorField):
             if len(plot_args.components_to_plot) == 0:
@@ -157,14 +157,14 @@ def _plot_snapshot(
 ) -> None:
     for comp_index in range(pdf_data.num_comps):
         ax = axs_grid[0][comp_index]
-        x, y = pdf_data.get_pdf(comp_index)
+        x_values, y_density = pdf_data.get_pdf(comp_index)
         ax.step(
-            x,
-            y,
+            x_values,
+            y_density,
             where="mid",
             lw=2.0,
             color=color,
-            zorder=1.0 / (comp_index + 1),
+            zorder=comp_index + 1,
         )
 
 
@@ -178,10 +178,8 @@ def _plot_series(
         cmap_name=cmap_name,
         cmin=0.25,
         vmin=0,
-        vmax=max(
-            0,
-            len(field_pdfs) - 1,
-        ),
+        vmax=max(0,
+                 len(field_pdfs) - 1),
     )
     for series_index, pdf_data in enumerate(field_pdfs):
         color = cmap(norm(series_index))
@@ -242,29 +240,41 @@ def _plot_field(
 class Plotter:
 
     VALID_FIELDS = {
-        "divb": {
-            "loader": "load_div_b_sfield",
-            "cmap": "Blues",
-        },
-        "mag": {
-            "loader": "load_magnetic_vfield",
-            "cmap": "Blues",
+        "rho": {
+            "loader": "load_density_sfield",
+            "cmap": "Greys",
         },
         "vel": {
             "loader": "load_velocity_vfield",
             "cmap": "Oranges",
         },
-        "rho": {
-            "loader": "load_density_sfield",
-            "cmap": "Greys",
+        "mag": {
+            "loader": "load_magnetic_vfield",
+            "cmap": "Blues",
         },
         "Etot": {
             "loader": "load_total_energy_sfield",
             "cmap": "cividis",
         },
+        "Ekin": {
+            "loader": "load_kinetic_energy_sfield",
+            "cmap": "magma",
+        },
         "Emag": {
             "loader": "load_magnetic_energy_density_sfield",
             "cmap": "plasma",
+        },
+        "Eint": {
+            "loader": "load_internal_energy_sfield",
+            "cmap": "magma",
+        },
+        "pressure": {
+            "loader": "load_pressure_sfield",
+            "cmap": "Purples",
+        },
+        "divb": {
+            "loader": "load_div_b_sfield",
+            "cmap": "bwr",
         },
     }
 
@@ -282,7 +292,8 @@ class Plotter:
             raise ValueError(f"Provide fields via -f from: {sorted(valid_fields)}")
         valid_axes = {"x", "y", "z"}
         ## default to all components (if not provided)
-        if not components_to_plot: components_to_plot = ["x", "y", "z"]
+        if not components_to_plot:
+            components_to_plot = ["x", "y", "z"]
         elif not set(components_to_plot).issubset(valid_axes):
             raise ValueError("Provide one or more components (via -c) from: x, y, z")
         self.input_dir = Path(input_dir)
@@ -295,17 +306,18 @@ class Plotter:
         self,
     ) -> None:
         dataset_dirs = helpers.resolve_dataset_dirs(self.input_dir)
-        if not dataset_dirs: return
+        if not dataset_dirs:
+            return
         fig_dir = dataset_dirs[0].parent
         for field_name in self.fields_to_plot:
-            meta = self.VALID_FIELDS[field_name]
+            field_meta = self.VALID_FIELDS[field_name]
             plot_args = PlotArgs(
                 fig_dir=Path(fig_dir),
                 dataset_dirs=dataset_dirs,
                 field_name=field_name,
                 components_to_plot=self.components_to_plot,
-                loader_name=meta["loader"],
-                cmap_name=meta["cmap"],
+                field_loader=field_meta["loader"],
+                cmap_name=field_meta["cmap"],
                 num_bins=self.num_bins,
                 verbose=self.verbose,
             )

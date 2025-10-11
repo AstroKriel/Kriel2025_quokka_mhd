@@ -29,7 +29,7 @@ class PlotArgs:
     field_name: str
     components_to_plot: list[Axis]
     axes_to_slice: list[Axis]
-    loader_name: str
+    field_loader: str
     cmap_name: str
     verbose: bool = False
 
@@ -74,12 +74,12 @@ class ProfileData:
 
 
 def _compute_centers(
-    domain,
+    domain_details,
     axis: Axis,
 ) -> numpy.ndarray:
-    (x_min, _), (y_min, _), (z_min, _) = domain.domain_bounds
-    num_cells_x, num_cells_y, num_cells_z = domain.resolution
-    cell_width_x, cell_width_y, cell_width_z = domain.cell_widths
+    (x_min, _), (y_min, _), (z_min, _) = domain_details.domain_bounds
+    num_cells_x, num_cells_y, num_cells_z = domain_details.resolution
+    cell_width_x, cell_width_y, cell_width_z = domain_details.cell_widths
     if axis == "x": return x_min + (numpy.arange(num_cells_x) + 0.5) * cell_width_x
     if axis == "y": return y_min + (numpy.arange(num_cells_y) + 0.5) * cell_width_y
     if axis == "z": return z_min + (numpy.arange(num_cells_z) + 0.5) * cell_width_z
@@ -124,14 +124,14 @@ def load_field_profiles(
     field_profiles: list[ProfileData] = []
     for dataset_dir in plot_args.dataset_dirs:
         with load_dataset.QuokkaDataset(dataset_dir=dataset_dir, verbose=False) as ds:
-            domain = ds.load_domain()
-            loader = getattr(ds, plot_args.loader_name)
-            field = loader()
+            domain_details = ds.load_domain_details()
+            field_loader = getattr(ds, plot_args.field_loader)
+            field = field_loader()
         sim_time = field.sim_time
         axes_names = sorted(plot_args.axes_to_slice)
         x_positions = numpy.empty((len(axes_names), ), dtype=object)
         for axis_index, axis_name in enumerate(axes_names):
-            x_positions[axis_index] = _compute_centers(domain, axis_name)
+            x_positions[axis_index] = _compute_centers(domain_details, axis_name)
         if isinstance(field, field_types.VectorField):
             if len(plot_args.components_to_plot) == 0:
                 raise ValueError(
@@ -264,29 +264,33 @@ def _plot_field(
 class Plotter:
 
     VALID_FIELDS = {
-        "mag": {
-            "loader": "load_magnetic_vfield",
-            "cmap": "Blues",
+        "rho": {
+            "loader": "load_density_sfield",
+            "cmap": "Greys",
         },
         "vel": {
             "loader": "load_velocity_vfield",
             "cmap": "Oranges",
         },
-        "rho": {
-            "loader": "load_density_sfield",
-            "cmap": "Greys",
-        },
-        "Eint": {
-            "loader": "load_internal_energy_sfield",
-            "cmap": "magma",
+        "mag": {
+            "loader": "load_magnetic_vfield",
+            "cmap": "Blues",
         },
         "Etot": {
             "loader": "load_total_energy_sfield",
             "cmap": "cividis",
         },
+        "Ekin": {
+            "loader": "load_kinetic_energy_sfield",
+            "cmap": "magma",
+        },
         "Emag": {
             "loader": "load_magnetic_energy_density_sfield",
             "cmap": "plasma",
+        },
+        "Eint": {
+            "loader": "load_internal_energy_sfield",
+            "cmap": "magma",
         },
         "pressure": {
             "loader": "load_pressure_sfield",
@@ -335,7 +339,7 @@ class Plotter:
                 dataset_dirs=dataset_dirs,
                 components_to_plot=self.components_to_plot,
                 axes_to_slice=self.axes_to_slice,
-                loader_name=field_meta["loader"],
+                field_loader=field_meta["loader"],
                 cmap_name=field_meta["cmap"],
                 verbose=self.verbose,
             )
