@@ -70,7 +70,8 @@ def _estimate_pdf(
         values=field_values.ravel(),
         num_bins=num_bins,
     )
-    return pdf.bin_centers, pdf.density
+    log10_density = numpy.ma.log10(numpy.ma.masked_less_equal(pdf.density, 0.0))
+    return pdf.bin_centers, log10_density
 
 
 def _style_axes(
@@ -79,9 +80,9 @@ def _style_axes(
 ) -> None:
     for comp_index in range(len(comp_labels)):
         ax = axs_grid[0][comp_index]
-        ax.set_xlabel(comp_labels[comp_index])
+        ax.set_xlabel(rf"$x \equiv$ {comp_labels[comp_index]}")
         if comp_index == 0:
-            ax.set_ylabel(r"$p$")
+            ax.set_ylabel(r"$\log_{10}\big(p(x)\big)$")
 
 
 ##
@@ -104,17 +105,17 @@ def load_field_pdfs(
                     f"Vector field '{plot_args.field_name}' requires at least one component via -c",
                 )
             comp_names = sorted(plot_args.components_to_plot)
-            comp_labels = [rf"$({field.field_label.strip('$')})_{{{comp_name}}}$" for comp_name in comp_names]
+            comp_labels = [rf"$({plot_args.field_name})_{{{comp_name}}}$" for comp_name in comp_names]
             grouped_bin_centers = numpy.empty((len(comp_names), ), dtype=object)
             grouped_densities = numpy.empty((len(comp_names), ), dtype=object)
             for comp_index, comp_name in enumerate(comp_names):
                 data_comp = field.data[LOOKUP_AXIS_INDEX[comp_name]]
-                bin_centers, pdf_density = _estimate_pdf(
+                bin_centers, log10_pdf_density = _estimate_pdf(
                     field_values=data_comp,
                     num_bins=plot_args.num_bins,
                 )
                 grouped_bin_centers[comp_index] = bin_centers
-                grouped_densities[comp_index] = pdf_density
+                grouped_densities[comp_index] = log10_pdf_density
             field_pdfs.append(
                 PDFData(
                     sim_time=sim_time,
@@ -124,18 +125,18 @@ def load_field_pdfs(
                 ),
             )
         elif isinstance(field, field_types.ScalarField):
-            bin_centers, pdf_density = _estimate_pdf(
+            bin_centers, log10_pdf_density = _estimate_pdf(
                 field_values=field.data,
                 num_bins=plot_args.num_bins,
             )
             grouped_bin_centers = numpy.array([bin_centers], dtype=object)
-            grouped_densities = numpy.array([pdf_density], dtype=object)
+            grouped_densities = numpy.array([log10_pdf_density], dtype=object)
             field_pdfs.append(
                 PDFData(
                     sim_time=sim_time,
                     grouped_bin_centers=grouped_bin_centers,
                     grouped_densities=grouped_densities,
-                    comp_labels=[field.field_label],
+                    comp_labels=[plot_args.field_name],
                 ),
             )
         else:
@@ -178,8 +179,10 @@ def _plot_series(
         cmap_name=cmap_name,
         cmin=0.25,
         vmin=0,
-        vmax=max(0,
-                 len(field_pdfs) - 1),
+        vmax=max(
+            0,
+            len(field_pdfs) - 1,
+        ),
     )
     for series_index, pdf_data in enumerate(field_pdfs):
         color = cmap(norm(series_index))
