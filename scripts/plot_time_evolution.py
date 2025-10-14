@@ -84,7 +84,6 @@ def _plot_evolution(
         plotter_args.data_series.vi_quantities,
         color=plotter_args.color,
         marker="o",
-        mec="black",
         ms=6,
         ls="-",
         lw=1.5,
