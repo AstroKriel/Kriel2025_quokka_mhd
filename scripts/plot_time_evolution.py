@@ -55,16 +55,17 @@ def _load_snapshot(
     loader_args: LoaderArgs,
 ) -> DataPoint:
     with load_dataset.QuokkaDataset(dataset_dir=loader_args.dataset_dir, verbose=loader_args.verbose) as ds:
-        domain_details = ds.load_domain_details()
+        uniform_domain = ds.load_domain_details()
         field_loader = getattr(ds, loader_args.field_loader)
         field = field_loader()  # expect ScalarField
     if not isinstance(field, field_types.ScalarField):
         raise ValueError(f"{loader_args.field_name} is not a scalar field (got {type(field).__name__}).")
+    assert field.sim_time is not None
     sim_time = float(field.sim_time)
     vi_quantity = float(
         field_operators.compute_sfield_volume_integral(
             sfield=field,
-            domain_details=domain_details,
+            uniform_domain=uniform_domain,
         ),
     )
     return DataPoint(
@@ -76,7 +77,8 @@ def _load_snapshot(
 def _plot_evolution(
     plotter_args: PlotterArgs,
 ) -> None:
-    fig, ax = plot_manager.create_figure()
+    fig, axs_grid = plot_manager.create_figure()
+    ax = axs_grid[0, 0]
     ax.plot(
         plotter_args.data_series.sim_times,
         plotter_args.data_series.vi_quantities,
@@ -117,6 +119,14 @@ class Plotter:
             "loader": "load_kinetic_energy_sfield",
             "color": "darkorange",
         },
+        "Ekin_div": {
+            "loader": "load_div_kinetic_energy_sfield",
+            "cmap": "magma",
+        },
+        "Ekin_sol": {
+            "loader": "load_sol_kinetic_energy_sfield",
+            "cmap": "magma",
+        },
         "Emag": {
             "loader": "load_magnetic_energy_density_sfield",
             "color": "red",
@@ -130,7 +140,7 @@ class Plotter:
             "color": "purple",
         },
         "divb": {
-            "loader": "load_div_b_sfield",
+            "loader": "load_divb_sfield",
             "color": "orange",
         },
     }

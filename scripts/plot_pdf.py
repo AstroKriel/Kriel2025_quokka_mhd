@@ -104,7 +104,7 @@ def load_field_pdfs(
                     f"Vector field '{plot_args.field_name}' requires at least one component via -c",
                 )
             comp_names = sorted(plot_args.components_to_plot)
-            comp_labels = [field.labels[LOOKUP_AXIS_INDEX[comp_name]] for comp_name in comp_names]
+            comp_labels = [rf"$({field.field_label.strip('$')})_{{{comp_name}}}$" for comp_name in comp_names]
             grouped_bin_centers = numpy.empty((len(comp_names), ), dtype=object)
             grouped_densities = numpy.empty((len(comp_names), ), dtype=object)
             for comp_index, comp_name in enumerate(comp_names):
@@ -135,7 +135,7 @@ def load_field_pdfs(
                     sim_time=sim_time,
                     grouped_bin_centers=grouped_bin_centers,
                     grouped_densities=grouped_densities,
-                    comp_labels=[field.label],
+                    comp_labels=[field.field_label],
                 ),
             )
         else:
@@ -204,7 +204,7 @@ def _plot_field(
     field_pdfs = load_field_pdfs(plot_args)
     if not field_pdfs: return
     num_cols = field_pdfs[0].num_comps
-    fig, axs_grid = helpers.create_axes_grid(
+    fig, axs_grid = helpers.create_figure(
         num_rows=1,
         num_cols=num_cols,
     )
@@ -260,6 +260,14 @@ class Plotter:
             "loader": "load_kinetic_energy_sfield",
             "cmap": "magma",
         },
+        "Ekin_div": {
+            "loader": "load_div_kinetic_energy_sfield",
+            "cmap": "magma",
+        },
+        "Ekin_sol": {
+            "loader": "load_sol_kinetic_energy_sfield",
+            "cmap": "magma",
+        },
         "Emag": {
             "loader": "load_magnetic_energy_density_sfield",
             "cmap": "plasma",
@@ -273,7 +281,7 @@ class Plotter:
             "cmap": "Purples",
         },
         "divb": {
-            "loader": "load_div_b_sfield",
+            "loader": "load_divb_sfield",
             "cmap": "bwr",
         },
     }

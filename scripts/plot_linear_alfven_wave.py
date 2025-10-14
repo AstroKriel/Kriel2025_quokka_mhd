@@ -34,8 +34,8 @@ def _safe_unit_vector(
 
 
 def _summarize_advection_field(
-    advection_vector_field: numpy.ndarray,  # shape (3, n_cells_x, n_cells_y, n_cells_z)
-    valid_mask: numpy.ndarray,  # shape (n_cells_x, n_cells_y, n_cells_z)
+    advection_vector_field: numpy.ndarray,  # shape (3, num_cells_x, num_cells_y, num_cells_z)
+    valid_mask: numpy.ndarray,  # shape (num_cells_x, num_cells_y, num_cells_z)
 ) -> AdvectionSummary:
     assert advection_vector_field.shape[0] == 3 and valid_mask.shape == advection_vector_field.shape[1:]
     component_x = advection_vector_field[0][valid_mask]
@@ -76,8 +76,8 @@ def _compute_advection_for_scalar(
 ) -> tuple[numpy.ndarray, numpy.ndarray]:
     """
   Returns:
-    advection_vector_field : shape (3, n_cells_x, n_cells_y, n_cells_z)
-    valid_mask             : shape (n_cells_x, n_cells_y, n_cells_z) True where valid
+    advection_vector_field : shape (3, num_cells_x, num_cells_y, num_cells_z)
+    valid_mask             : shape (num_cells_x, num_cells_y, num_cells_z) True where valid
   """
     # time_derivative = ( s^{n+1} - s^n ) / delta_t
     time_derivative = (scalar_next - scalar_prev) / float(delta_time)
@@ -86,7 +86,7 @@ def _compute_advection_for_scalar(
     gradient_field = field_operators.compute_sfield_gradient(
         sfield=scalar_next,
         domain_lengths=domain_lengths,
-    )  # shape (3, n_cells_x, n_cells_y, n_cells_z)
+    )  # shape (3, num_cells_x, num_cells_y, num_cells_z)
 
     # gradient_norm_squared = \sum_i ( \partial_i s )^2
     gradient_norm_squared = numpy.sum(gradient_field * gradient_field, axis=0)
@@ -145,7 +145,7 @@ class Plotter:
                 verbose=False,
         ) as dataset_previous:
             vfield_previous = dataset_previous.load_magnetic_field()
-            domain = dataset_previous.load_domain()
+            uniform_domain = dataset_previous.load_domain_details()
         with load_dataset.QuokkaDataset(dataset_dir=next_dataset_dir, verbose=False) as dataset_next:
             vfield_next = dataset_next.load_magnetic_field()
 
@@ -172,7 +172,7 @@ class Plotter:
                 scalar_next=scalar_next,
                 scalar_prev=scalar_prev,
                 delta_time=delta_time,
-                domain_lengths=domain.domain_lengths,
+                domain_lengths=uniform_domain.domain_lengths,
                 gradient_norm2_epsilon=self.gradient_norm2_epsilon,
             )
 

@@ -13,22 +13,17 @@ from jormi.ww_plots import plot_manager
 ##
 
 
-def create_axes_grid(
+def create_figure(
     num_rows: int,
     num_cols: int,
     add_cbar_space: bool = False,
 ):
-    fig, axs = plot_manager.create_figure(
+    fig, axs_grid = plot_manager.create_figure(
         num_rows=num_rows,
         num_cols=num_cols,
         share_x=False,
         y_spacing=0.25,
         x_spacing=0.75 if add_cbar_space else 0.25,
-    )
-    axs_grid = plot_manager.get_axs_grid(
-        axs=axs,
-        num_rows=num_rows,
-        num_cols=num_cols,
     )
     return fig, axs_grid
 

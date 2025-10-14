@@ -74,12 +74,12 @@ class ProfileData:
 
 
 def _compute_centers(
-    domain_details,
+    uniform_domain,
     axis: Axis,
 ) -> numpy.ndarray:
-    (x_min, _), (y_min, _), (z_min, _) = domain_details.domain_bounds
-    num_cells_x, num_cells_y, num_cells_z = domain_details.resolution
-    cell_width_x, cell_width_y, cell_width_z = domain_details.cell_widths
+    (x_min, _), (y_min, _), (z_min, _) = uniform_domain.domain_bounds
+    num_cells_x, num_cells_y, num_cells_z = uniform_domain.resolution
+    cell_width_x, cell_width_y, cell_width_z = uniform_domain.cell_widths
     if axis == "x": return x_min + (numpy.arange(num_cells_x) + 0.5) * cell_width_x
     if axis == "y": return y_min + (numpy.arange(num_cells_y) + 0.5) * cell_width_y
     if axis == "z": return z_min + (numpy.arange(num_cells_z) + 0.5) * cell_width_z
@@ -124,21 +124,21 @@ def load_field_profiles(
     field_profiles: list[ProfileData] = []
     for dataset_dir in plot_args.dataset_dirs:
         with load_dataset.QuokkaDataset(dataset_dir=dataset_dir, verbose=False) as ds:
-            domain_details = ds.load_domain_details()
+            uniform_domain = ds.load_domain_details()
             field_loader = getattr(ds, plot_args.field_loader)
             field = field_loader()
         sim_time = field.sim_time
         axes_names = sorted(plot_args.axes_to_slice)
         x_positions = numpy.empty((len(axes_names), ), dtype=object)
         for axis_index, axis_name in enumerate(axes_names):
-            x_positions[axis_index] = _compute_centers(domain_details, axis_name)
+            x_positions[axis_index] = _compute_centers(uniform_domain, axis_name)
         if isinstance(field, field_types.VectorField):
             if len(plot_args.components_to_plot) == 0:
                 raise ValueError(
                     f"Vector field '{plot_args.field_name}' requires at least one component via -c",
                 )
             comp_names = sorted(plot_args.components_to_plot)
-            comp_labels = [field.labels[LOOKUP_AXIS_INDEX[comp_name]] for comp_name in comp_names]
+            comp_labels = [rf"$({field.field_label.strip('$')})_{{{comp_name}}}$" for comp_name in comp_names]
             profile_data = numpy.empty((len(axes_names), len(comp_names)), dtype=object)
             for axis_index, axis_name in enumerate(axes_names):
                 for comp_index, comp_name in enumerate(comp_names):
@@ -163,7 +163,7 @@ def load_field_profiles(
                     x_positions=x_positions,
                     y_profile=profile_data,
                     axes_labels=axes_names,
-                    comp_labels=[field.label],
+                    comp_labels=[field.field_label],
                 ),
             )
         else:
@@ -227,7 +227,7 @@ def _plot_field(
 ) -> None:
     field_profiles = load_field_profiles(plot_args)
     if not field_profiles: return
-    fig, axs_grid = helpers.create_axes_grid(
+    fig, axs_grid = helpers.create_figure(
         num_rows=field_profiles[0].num_comps,
         num_cols=field_profiles[0].num_axes,
     )

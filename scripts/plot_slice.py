@@ -61,10 +61,10 @@ class SnapshotArgs:
 
 
 def _get_slice_bounds(
-    domain_details: field_types.UniformDomain,
+    uniform_domain: field_types.UniformDomain,
     axis_to_slice: Axis,
 ) -> tuple[float, float, float, float]:
-    (x_min, x_max), (y_min, y_max), (z_min, z_max) = domain_details.domain_bounds
+    (x_min, x_max), (y_min, y_max), (z_min, z_max) = uniform_domain.domain_bounds
     if axis_to_slice == "z": return (x_min, x_max, y_min, y_max)
     if axis_to_slice == "y": return (x_min, x_max, z_min, z_max)
     if axis_to_slice == "x": return (y_min, y_max, z_min, z_max)
@@ -118,7 +118,7 @@ def _plot_slice(
     ax,
     sim_time: float,
     field_slice: SliceArgs,
-    domain_details: field_types.UniformDomain,
+    uniform_domain: field_types.UniformDomain,
     axis_to_slice: Axis,
     label: str,
     cmap_name: str,
@@ -126,7 +126,7 @@ def _plot_slice(
     plot_data.plot_sfield_slice(
         ax=ax,
         field_slice=field_slice.data_2d,
-        axis_bounds=_get_slice_bounds(domain_details, axis_to_slice),
+        axis_bounds=_get_slice_bounds(uniform_domain, axis_to_slice),
         cmap_name=cmap_name,
         add_colorbar=True,
         cbar_label=label,
@@ -172,7 +172,7 @@ def _plot_snapshot(
     snapshot: SnapshotArgs,
 ) -> None:
     with load_dataset.QuokkaDataset(dataset_dir=snapshot.dataset_dir, verbose=snapshot.verbose) as ds:
-        domain_details = ds.load_domain_details()
+        uniform_domain = ds.load_domain_details()
         loader = getattr(ds, snapshot.field_args.field_loader)
         field = loader()  # ScalarField or VectorField
     sim_time = float(field.sim_time)
@@ -183,23 +183,23 @@ def _plot_snapshot(
             raise ValueError(
                 f"Vector field '{snapshot.field_args.field_name}' requires at least one component via -c",
             )
-        for comp in sorted(snapshot.components_to_plot):
+        for comp_name in sorted(snapshot.components_to_plot):
             data_items.append(
                 DataItem(
-                    data_3d=field.data[LOOKUP_AXIS_INDEX[comp]],
-                    label=field.labels[LOOKUP_AXIS_INDEX[comp]],
+                    data_3d=field.data[LOOKUP_AXIS_INDEX[comp_name]],
+                    label=rf"$({field.field_label.strip('$')})_{{{comp_name}}}$",
                 ),
             )
     elif isinstance(field, field_types.ScalarField):
         data_items = [
             DataItem(
                 data_3d=field.data,
-                label=field.label,
+                label=field.field_label,
             ),
         ]
     else:
         raise ValueError(f"{snapshot.field_args.field_name} is an unrecognised field type.")
-    fig, axs_grid = helpers.create_axes_grid(
+    fig, axs_grid = helpers.create_figure(
         num_rows=len(data_items),
         num_cols=len(snapshot.axes_to_slice),
         add_cbar_space=True,
@@ -215,7 +215,7 @@ def _plot_snapshot(
                 ax=ax,
                 sim_time=sim_time,
                 field_slice=field_slice,
-                domain_details=domain_details,
+                uniform_domain=uniform_domain,
                 axis_to_slice=axis_to_slice,
                 label=data_item.label,
                 cmap_name=snapshot.field_args.cmap_name,
@@ -261,8 +261,16 @@ class Plotter:
             "loader": "load_kinetic_energy_sfield",
             "cmap": "magma",
         },
+        "Ekin_div": {
+            "loader": "load_div_kinetic_energy_sfield",
+            "cmap": "magma",
+        },
+        "Ekin_sol": {
+            "loader": "load_sol_kinetic_energy_sfield",
+            "cmap": "magma",
+        },
         "Emag": {
-            "loader": "load_magnetic_energy_density_sfield",
+            "loader": "load_magnetic_energy_sfield",
             "cmap": "plasma",
         },
         "Eint": {
@@ -274,7 +282,7 @@ class Plotter:
             "cmap": "Purples",
         },
         "divb": {
-            "loader": "load_div_b_sfield",
+            "loader": "load_divb_sfield",
             "cmap": "bwr",
         },
     }
