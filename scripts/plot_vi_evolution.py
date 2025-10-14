@@ -7,7 +7,8 @@
 from pathlib import Path
 from dataclasses import dataclass
 from jormi.utils import parallel_utils
-from jormi.ww_plots import plot_manager
+from jormi.ww_data import fit_data
+from jormi.ww_plots import plot_manager, annotate_axis
 from jormi.ww_fields import field_types, field_operators
 from ww_quokka_sims.sim_io import load_dataset
 from utils import helpers
@@ -51,6 +52,41 @@ class PlotterArgs:
 ##
 
 
+def add_fit_summary(
+    ax,
+    fit_dict: dict,
+    *,
+    x_pos: float = 0.95,
+    y_pos: float = 0.95,
+    x_alignment: str = "right",
+    y_alignment: str = "top",
+    color: str = "black",
+    fontsize: float = 12,
+    with_box: bool = True,
+) -> None:
+    slope_best = fit_dict["slope"]["best"]
+    slope_std = fit_dict["slope"]["std"]
+    intercept_best = fit_dict["intercept"]["best"]
+    intercept_std = fit_dict["intercept"]["std"]
+    slope_str = f"{slope_best:.3e}" + (f" +/- {slope_std:.1e}" if slope_std is not None else "")
+    intercept_str = f"{intercept_best:.3e}" + (f" +/- {intercept_std:.1e}" if intercept_std is not None else "")
+    label = f"slope: {slope_str}\nintercept: {intercept_str}"
+    annotate_axis.add_text(
+        ax=ax,
+        x_pos=x_pos,
+        y_pos=y_pos,
+        label=label,
+        x_alignment=x_alignment,
+        y_alignment=y_alignment,
+        fontsize=fontsize,
+        font_color=color,
+        add_box=with_box,
+        box_alpha=0.85,
+        face_color="white",
+        edge_color=color,
+    )
+
+
 def _load_snapshot(
     loader_args: LoaderArgs,
 ) -> DataPoint:
@@ -87,6 +123,22 @@ def _plot_evolution(
         ms=6,
         ls="-",
         lw=1.5,
+    )
+    fit_results = fit_data.fit_1d_linear_model(
+        x_values= plotter_args.data_series.sim_times,
+        y_values= plotter_args.data_series.vi_quantities,
+        index_start = 0,
+        index_end = 3 * len(plotter_args.data_series.sim_times) // 4,
+    )
+    intercept = fit_results["intercept"]["best"]
+    slope = fit_results["slope"]["best"]
+    x0, x1 = plotter_args.data_series.sim_times[0], plotter_args.data_series.sim_times[-1]
+    y0, y1 = intercept + slope * x0, intercept + slope * x1
+    ax.plot([x0, x1], [y0, y1], linestyle="--", linewidth=1.5, color=plotter_args.color, alpha=0.9)
+    add_fit_summary(
+        ax=ax,
+        fit_dict=fit_results,
+        color=plotter_args.color,
     )
     ax.set_xlabel("time")
     ax.set_ylabel(plotter_args.field_name)

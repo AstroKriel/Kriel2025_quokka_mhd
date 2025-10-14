@@ -64,6 +64,12 @@ def get_user_input():
         default=False,
         help="Skip to animation if provided (default: False).",
     )
+    parser.add_argument(
+        "--fit",
+        action="store_true",
+        default=False,
+        help="Fit to some data (default: False).",
+    )
     args = parser.parse_args()
     return args
 
