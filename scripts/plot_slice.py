@@ -187,14 +187,14 @@ def _plot_snapshot(
             data_items.append(
                 DataItem(
                     data_3d=field.data[LOOKUP_AXIS_INDEX[comp_name]],
-                    label=rf"$({field.field_label.strip('$')})_{{{comp_name}}}$",
+                    label=rf"$(${snapshot.field_args.field_name}$)_{{{comp_name}}}$",
                 ),
             )
     elif isinstance(field, field_types.ScalarField):
         data_items = [
             DataItem(
                 data_3d=field.data,
-                label=field.field_label,
+                label=snapshot.field_args.field_name,
             ),
         ]
     else:

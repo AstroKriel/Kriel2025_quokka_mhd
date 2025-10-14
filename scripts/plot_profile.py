@@ -138,7 +138,7 @@ def load_field_profiles(
                     f"Vector field '{plot_args.field_name}' requires at least one component via -c",
                 )
             comp_names = sorted(plot_args.components_to_plot)
-            comp_labels = [rf"$({field.field_label.strip('$')})_{{{comp_name}}}$" for comp_name in comp_names]
+            comp_labels = [rf"$({plot_args.field_name})_{{{comp_name}}}$" for comp_name in comp_names]
             profile_data = numpy.empty((len(axes_names), len(comp_names)), dtype=object)
             for axis_index, axis_name in enumerate(axes_names):
                 for comp_index, comp_name in enumerate(comp_names):
