@@ -84,6 +84,7 @@ def _plot_evolution(
         plotter_args.data_series.vi_quantities,
         color=plotter_args.color,
         marker="o",
+        mec="black",
         ms=6,
         ls="-",
         lw=1.5,
@@ -121,11 +122,11 @@ class Plotter:
         },
         "Ekin_div": {
             "loader": "load_div_kinetic_energy_sfield",
-            "cmap": "magma",
+            "color": "darkorange",
         },
         "Ekin_sol": {
             "loader": "load_sol_kinetic_energy_sfield",
-            "cmap": "magma",
+            "color": "darkorange",
         },
         "Emag": {
             "loader": "load_magnetic_energy_density_sfield",
@@ -133,7 +134,7 @@ class Plotter:
         },
         "Eint": {
             "loader": "load_internal_energy_sfield",
-            "color": "goldenrod",
+            "color": "sandybrown",
         },
         "pressure": {
             "loader": "load_pressure_sfield",
