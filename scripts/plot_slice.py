@@ -172,7 +172,7 @@ def _plot_snapshot(
     snapshot: SnapshotArgs,
 ) -> None:
     with load_dataset.QuokkaDataset(dataset_dir=snapshot.dataset_dir, verbose=snapshot.verbose) as ds:
-        uniform_domain = ds.load_domain_details()
+        uniform_domain = ds.load_uniform_domain()
         loader = getattr(ds, snapshot.field_args.field_loader)
         field = loader()  # ScalarField or VectorField
     sim_time = float(field.sim_time)
