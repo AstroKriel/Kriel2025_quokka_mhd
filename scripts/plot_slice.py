@@ -52,6 +52,7 @@ class SnapshotArgs:
     field_args: FieldArgs
     components_to_plot: list[Axis]  # empty for scalars
     axes_to_slice: list[Axis]
+    index_width: int
     verbose: bool
 
 
@@ -60,7 +61,7 @@ class SnapshotArgs:
 ##
 
 
-def _get_slice_bounds(
+def get_slice_bounds(
     uniform_domain: field_types.UniformDomain,
     axis_to_slice: Axis,
 ) -> tuple[float, float, float, float]:
@@ -71,13 +72,35 @@ def _get_slice_bounds(
     raise ValueError("axis_to_slice must be one of: x, y, z")
 
 
-def _get_slice_labels(
+def get_slice_labels(
     axis_to_slice: Axis,
 ) -> tuple[str, str]:
     if axis_to_slice == "z": return ("x", "y")
     if axis_to_slice == "y": return ("x", "z")
     if axis_to_slice == "x": return ("y", "z")
     raise ValueError("axis_to_slice must be one of: x, y, z")
+
+
+def get_dataset_index(
+    dataset_dir: Path,
+) -> str:
+    dataset_name = dataset_dir.name
+    name_parts = dataset_name.split("plt")
+    if len(name_parts) < 2:
+        raise ValueError(f"Unexpected dataset name format: {dataset_name}")
+    digits_str = name_parts[1].split(".")[0]
+    if not digits_str.isdigit():
+        raise ValueError(f"Expected digits after 'plt' in {dataset_name}")  # phrase it as what we didnt get
+    return digits_str
+
+
+def get_max_index_width(dataset_dirs: list[Path]) -> int:
+    if not dataset_dirs: return 1
+    index_widths: list[int] = []
+    for dataset_dir in dataset_dirs:
+        dataset_index = get_dataset_index(dataset_dir)
+        index_widths.append(len(dataset_index))
+    return max(index_widths) if index_widths else 1  # why 1 by default? what does this indicate?
 
 
 def slice_field(
@@ -126,7 +149,7 @@ def _plot_slice(
     plot_data.plot_sfield_slice(
         ax=ax,
         field_slice=field_slice.data_2d,
-        axis_bounds=_get_slice_bounds(uniform_domain, axis_to_slice),
+        axis_bounds=get_slice_bounds(uniform_domain, axis_to_slice),
         cmap_name=cmap_name,
         add_colorbar=True,
         cbar_label=label,
@@ -176,7 +199,8 @@ def _plot_snapshot(
         loader = getattr(ds, snapshot.field_args.field_loader)
         field = loader()  # ScalarField or VectorField
     sim_time = float(field.sim_time)
-    plt_index = snapshot.dataset_dir.name.split("plt")[1]
+    dataset_index_str = get_dataset_index(snapshot.dataset_dir)
+    dataset_index = int(dataset_index_str)
     data_items: list[DataItem] = []
     if isinstance(field, field_types.VectorField):
         if not snapshot.components_to_plot:
@@ -224,11 +248,11 @@ def _plot_snapshot(
     for row_index in range(num_rows):
         for col_index, axis_to_slice in enumerate(snapshot.axes_to_slice):
             ax = axs_grid[row_index][col_index]
-            xlabel, ylabel = _get_slice_labels(axis_to_slice)
+            xlabel, ylabel = get_slice_labels(axis_to_slice)
             if (num_rows == 1) or (row_index == num_rows - 1):
                 ax.set_xlabel(xlabel)
             ax.set_ylabel(ylabel)
-    fig_name = f"{snapshot.field_args.field_name}_slice_{plt_index}.png"
+    fig_name = f"{snapshot.field_args.field_name}_slice_{dataset_index:0{snapshot.index_width}d}.png"
     fig_path = snapshot.fig_dir / fig_name
     plot_manager.save_figure(fig=fig, fig_path=fig_path, verbose=snapshot.verbose)
 
@@ -317,6 +341,9 @@ class Plotter:
     def run(self) -> None:
         dataset_dirs = helpers.resolve_dataset_dirs(self.input_dir)
         if not dataset_dirs: return
+        # NEW: compute consistent zero-pad width once
+        self.index_width = get_max_index_width(dataset_dirs)
+
         fig_dir = dataset_dirs[0].parent
         if not self.animate_only:
             snapshots = self._prepare_snapshots(
@@ -343,10 +370,11 @@ class Plotter:
             ).filter(directory=fig_dir)
             if len(fig_paths) < 3: continue
             mp4_path = Path(fig_dir) / f"{field_name}_slices.mp4"
+            digits_glob = "[0-9]" * self.index_width
             plot_manager.animate_pngs_to_mp4(
                 frames_dir=fig_dir,
                 mp4_path=mp4_path,
-                pattern=f"{field_name}_slice_*.png",
+                pattern=f"{field_name}_slice_{digits_glob}.png",
                 fps=30,
                 timeout_seconds=120,
             )
@@ -372,6 +400,7 @@ class Plotter:
                         field_args=field_args,
                         components_to_plot=self.components_to_plot,
                         axes_to_slice=self.axes_to_slice,
+                        index_width=self.index_width,
                         verbose=False,
                     ),
                 )
