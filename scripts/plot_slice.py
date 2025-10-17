@@ -341,9 +341,7 @@ class Plotter:
     def run(self) -> None:
         dataset_dirs = helpers.resolve_dataset_dirs(self.input_dir)
         if not dataset_dirs: return
-        # NEW: compute consistent zero-pad width once
         self.index_width = get_max_index_width(dataset_dirs)
-
         fig_dir = dataset_dirs[0].parent
         if not self.animate_only:
             snapshots = self._prepare_snapshots(
@@ -370,11 +368,10 @@ class Plotter:
             ).filter(directory=fig_dir)
             if len(fig_paths) < 3: continue
             mp4_path = Path(fig_dir) / f"{field_name}_slices.mp4"
-            digits_glob = "[0-9]" * self.index_width
             plot_manager.animate_pngs_to_mp4(
                 frames_dir=fig_dir,
                 mp4_path=mp4_path,
-                pattern=f"{field_name}_slice_{digits_glob}.png",
+                pattern=f"{field_name}_slice_*.png",
                 fps=30,
                 timeout_seconds=120,
             )
