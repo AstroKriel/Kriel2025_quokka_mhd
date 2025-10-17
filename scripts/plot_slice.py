@@ -5,15 +5,15 @@
 ##
 
 import numpy
-from typing import Literal
+from typing import Literal, NamedTuple
 from pathlib import Path
 from dataclasses import dataclass
-from jormi.ww_io import io_manager
-from jormi.utils import parallel_utils
+from jormi.ww_io import io_manager, log_manager
+from jormi.utils import parallel_utils, type_utils
 from jormi.ww_plots import plot_manager, plot_data, annotate_axis
 from jormi.ww_fields import field_types
 from ww_quokka_sims.sim_io import load_dataset
-from utils import helpers
+import utils
 
 ##
 ## === DATA TYPES
@@ -25,11 +25,10 @@ LOOKUP_AXIS_INDEX: dict[Axis, int] = {"x": 0, "y": 1, "z": 2}
 
 
 @dataclass(frozen=True)
-class SliceArgs:
-    data_2d: numpy.ndarray
-    label: str
-    min_value: float
-    max_value: float
+class PlottingSetup:
+    dataset_dirs: list[Path]
+    fig_dir: Path
+    index_width: int
 
 
 @dataclass(frozen=True)
@@ -39,21 +38,48 @@ class FieldArgs:
     cmap_name: str
 
 
+class WorkerArgs(NamedTuple):
+    field_name: str
+    field_loader: str
+    cmap_name: str
+    comps_to_plot: tuple[Axis, ...]
+    axes_to_slice: tuple[Axis, ...]
+    fig_dir: str
+    dataset_dir: str
+    index_width: int
+    verbose: bool
+
+
 @dataclass(frozen=True)
-class DataItem:
+class Dataset:
+    uniform_domain: field_types.UniformDomain
+    field: field_types.ScalarField | field_types.VectorField
+
+    @property
+    def sim_time(self) -> float:
+        sim_time = self.field.sim_time
+        type_utils.assert_finite_float(
+            var_obj=sim_time,
+            var_name="sim_time",
+            allow_none=False,
+        )
+        assert sim_time is not None
+        return float(sim_time)
+
+
+@dataclass(frozen=True)
+class FieldComp:
     data_3d: numpy.ndarray
     label: str
 
 
 @dataclass(frozen=True)
-class SnapshotArgs:
-    fig_dir: Path
-    dataset_dir: Path
-    field_args: FieldArgs
-    components_to_plot: list[Axis]  # empty for scalars
-    axes_to_slice: list[Axis]
-    index_width: int
-    verbose: bool
+class SlicedField:
+    data_2d: numpy.ndarray
+    label: str
+    min_value: float
+    max_value: float
+    axis_bounds: tuple[float, float, float, float]
 
 
 ##
@@ -62,6 +88,7 @@ class SnapshotArgs:
 
 
 def get_slice_bounds(
+    *,
     uniform_domain: field_types.UniformDomain,
     axis_to_slice: Axis,
 ) -> tuple[float, float, float, float]:
@@ -81,32 +108,12 @@ def get_slice_labels(
     raise ValueError("axis_to_slice must be one of: x, y, z")
 
 
-def get_dataset_index(
-    dataset_dir: Path,
-) -> str:
-    dataset_name = dataset_dir.name
-    name_parts = dataset_name.split("plt")
-    if len(name_parts) < 2:
-        raise ValueError(f"Unexpected dataset name format: {dataset_name}")
-    digits_str = name_parts[1].split(".")[0]
-    if not digits_str.isdigit():
-        raise ValueError(f"Expected digits after 'plt' in {dataset_name}")  # phrase it as what we didnt get
-    return digits_str
-
-
-def get_max_index_width(dataset_dirs: list[Path]) -> int:
-    if not dataset_dirs: return 1
-    index_widths: list[int] = []
-    for dataset_dir in dataset_dirs:
-        dataset_index = get_dataset_index(dataset_dir)
-        index_widths.append(len(dataset_index))
-    return max(index_widths) if index_widths else 1  # why 1 by default? what does this indicate?
-
-
 def slice_field(
+    *,
     data_3d: numpy.ndarray,
     axis_to_slice: Axis,
-) -> SliceArgs:
+    uniform_domain: field_types.UniformDomain,
+) -> SlicedField:
     num_cells_x, num_cells_y, num_cells_z = data_3d.shape
     slice_index_x = num_cells_x // 2
     slice_index_y = num_cells_y // 2
@@ -122,34 +129,38 @@ def slice_field(
         label = r"$(x=L_x/2, y, z)$"
     else:
         raise ValueError("axis_to_slice must be one of: x, y, z")
+    axis_bounds = get_slice_bounds(
+        uniform_domain=uniform_domain,
+        axis_to_slice=axis_to_slice,
+    )
     min_value = float(numpy.min(data_2d))
     max_value = float(numpy.max(data_2d))
-    return SliceArgs(
+    return SlicedField(
         data_2d=data_2d,
         label=label,
         min_value=min_value,
         max_value=max_value,
+        axis_bounds=axis_bounds,
     )
 
 
 ##
-## === PLOTTING
+## === PLOTTING PRIMITIVES
 ##
 
 
-def _plot_slice(
+def plot_slice(
+    *,
     ax,
     sim_time: float,
-    field_slice: SliceArgs,
-    uniform_domain: field_types.UniformDomain,
-    axis_to_slice: Axis,
+    field_slice: SlicedField,
     label: str,
     cmap_name: str,
 ) -> None:
     plot_data.plot_sfield_slice(
         ax=ax,
         field_slice=field_slice.data_2d,
-        axis_bounds=get_slice_bounds(uniform_domain, axis_to_slice),
+        axis_bounds=field_slice.axis_bounds,
         cmap_name=cmap_name,
         add_colorbar=True,
         cbar_label=label,
@@ -191,174 +202,291 @@ def _plot_slice(
     )
 
 
-def _plot_snapshot(
-    snapshot: SnapshotArgs,
-) -> None:
-    with load_dataset.QuokkaDataset(dataset_dir=snapshot.dataset_dir, verbose=snapshot.verbose) as ds:
-        uniform_domain = ds.load_uniform_domain()
-        loader = getattr(ds, snapshot.field_args.field_loader)
-        field = loader()  # ScalarField or VectorField
-    sim_time = float(field.sim_time)
-    dataset_index_str = get_dataset_index(snapshot.dataset_dir)
-    dataset_index = int(dataset_index_str)
-    data_items: list[DataItem] = []
-    if isinstance(field, field_types.VectorField):
-        if not snapshot.components_to_plot:
-            raise ValueError(
-                f"Vector field '{snapshot.field_args.field_name}' requires at least one component via -c",
-            )
-        for comp_name in sorted(snapshot.components_to_plot):
-            data_items.append(
-                DataItem(
+##
+## === PER-FIELD PLOTTER (stateful per field)
+##
+
+
+@dataclass(frozen=True)
+class FieldPlotter:
+    field_args: FieldArgs
+    comps_to_plot: tuple[Axis, ...]
+    axes_to_slice: tuple[Axis, ...]
+
+    def _load_dataset(
+        self,
+        *,
+        dataset_dir: Path,
+        verbose: bool,
+    ) -> Dataset:
+        with load_dataset.QuokkaDataset(dataset_dir=dataset_dir, verbose=verbose) as ds:
+            uniform_domain = ds.load_uniform_domain()
+            loader_function = getattr(ds, self.field_args.field_loader)
+            field = loader_function()  # ScalarField or VectorField
+        return Dataset(
+            uniform_domain=uniform_domain,
+            field=field,
+        )
+
+    def _get_field_comps(
+        self,
+        *,
+        field: field_types.ScalarField | field_types.VectorField,
+    ) -> list[FieldComp]:
+        field_name = self.field_args.field_name
+        if isinstance(field, field_types.ScalarField):
+            return [
+                FieldComp(
+                    data_3d=field.data,
+                    label=field_name,
+                ),
+            ]
+        if isinstance(field, field_types.VectorField):
+            if not self.comps_to_plot:
+                raise ValueError(f"Vector field '{field_name}' requires at least one component via -c")
+            return [
+                FieldComp(
                     data_3d=field.data[LOOKUP_AXIS_INDEX[comp_name]],
-                    label=rf"$(${snapshot.field_args.field_name}$)_{{{comp_name}}}$",
+                    label=rf"$({field_name})_{{{comp_name}}}$",
+                ) for comp_name in sorted(self.comps_to_plot)
+            ]
+        raise ValueError(f"{field_name} is an unrecognised field type.")
+
+    def _plot_field_comps(
+        self,
+        *,
+        axes_grid,
+        field_comps: list[FieldComp],
+        uniform_domain: field_types.UniformDomain,
+        sim_time: float,
+    ) -> None:
+        for row_index, field_comp in enumerate(field_comps):
+            for col_index, axis_to_slice in enumerate(self.axes_to_slice):
+                ax = axes_grid[row_index][col_index]
+                field_slice = slice_field(
+                    data_3d=field_comp.data_3d,
+                    axis_to_slice=axis_to_slice,
+                    uniform_domain=uniform_domain,
+                )
+                plot_slice(
+                    ax=ax,
+                    sim_time=sim_time,
+                    field_slice=field_slice,
+                    label=field_comp.label,
+                    cmap_name=self.field_args.cmap_name,
+                )
+
+    def _label_axes(
+        self,
+        *,
+        axes_grid,
+    ) -> None:
+        num_rows = len(axes_grid)
+        for row_index in range(num_rows):
+            for col_index, axis_to_slice in enumerate(self.axes_to_slice):
+                ax = axes_grid[row_index][col_index]
+                x_label_str, y_label_str = get_slice_labels(axis_to_slice)
+                if (num_rows == 1) or (row_index == num_rows - 1):
+                    ax.set_xlabel(x_label_str)
+                ax.set_ylabel(y_label_str)
+
+    def plot_dataset(
+        self,
+        *,
+        fig_dir: Path,
+        dataset_dir: Path,
+        index_width: int,
+        verbose: bool,
+    ) -> None:
+        dataset = self._load_dataset(dataset_dir=dataset_dir, verbose=verbose)
+        dataset_index = int(utils.get_dataset_index(dataset_dir))
+        field_comps = self._get_field_comps(field=dataset.field)
+        fig, axes_grid = utils.create_figure(
+            num_rows=len(field_comps),
+            num_cols=len(self.axes_to_slice),
+            add_cbar_space=True,
+        )
+        self._plot_field_comps(
+            axes_grid=axes_grid,
+            field_comps=field_comps,
+            uniform_domain=dataset.uniform_domain,
+            sim_time=dataset.sim_time,
+        )
+        self._label_axes(axes_grid=axes_grid)
+        figure_name = f"{self.field_args.field_name}_slice_{dataset_index:0{index_width}d}.png"
+        figure_path = fig_dir / figure_name
+        plot_manager.save_figure(
+            fig=fig,
+            fig_path=figure_path,
+            verbose=verbose,
+        )
+
+
+def render_fields_in_serial(
+    *,
+    fields_to_plot: list[str],
+    comps_to_plot: tuple[Axis, ...],
+    axes_to_slice: tuple[Axis, ...],
+    dataset_dirs: list[Path],
+    fig_dir: Path,
+    index_width: int,
+) -> None:
+    for field_name in fields_to_plot:
+        field_meta = utils.QUOKKA_FIELDS_LOOKUP[field_name]
+        field_args = FieldArgs(
+            field_name=field_name,
+            field_loader=field_meta["loader"],
+            cmap_name=field_meta["cmap"],
+        )
+        field_plotter = FieldPlotter(
+            field_args=field_args,
+            comps_to_plot=comps_to_plot,
+            axes_to_slice=axes_to_slice,
+        )
+        for dataset_dir in dataset_dirs:
+            field_plotter.plot_dataset(
+                fig_dir=fig_dir,
+                dataset_dir=dataset_dir,
+                index_width=index_width,
+                verbose=False,
+            )
+
+
+def _plot_dataset_worker(
+    *args,
+) -> None:
+    if len(args) == 1 and isinstance(args[0], WorkerArgs):
+        worker_args = args[0]
+    elif len(args) == len(WorkerArgs._fields):
+        worker_args = WorkerArgs(*args)
+    else:
+        raise TypeError(f"Expected WorkerArgs or {len(WorkerArgs._fields)} args, but only got {len(args)}.")
+    field_args = FieldArgs(
+        field_name=worker_args.field_name,
+        field_loader=worker_args.field_loader,
+        cmap_name=worker_args.cmap_name,
+    )
+    field_plotter = FieldPlotter(
+        field_args=field_args,
+        comps_to_plot=worker_args.comps_to_plot,
+        axes_to_slice=worker_args.axes_to_slice,
+    )
+    field_plotter.plot_dataset(
+        fig_dir=Path(worker_args.fig_dir),
+        dataset_dir=Path(worker_args.dataset_dir),
+        index_width=int(worker_args.index_width),
+        verbose=bool(worker_args.verbose),
+    )
+
+
+def render_fields_in_parallel(
+    *,
+    fields_to_plot: list[str],
+    comps_to_plot: tuple[Axis, ...],
+    axes_to_slice: tuple[Axis, ...],
+    dataset_dirs: list[Path],
+    fig_dir: Path,
+    index_width: int,
+) -> None:
+    grouped_worker_args: list[WorkerArgs] = []
+    for field_name in fields_to_plot:
+        field_meta = utils.QUOKKA_FIELDS_LOOKUP[field_name]
+        for dataset_dir in dataset_dirs:
+            grouped_worker_args.append(
+                WorkerArgs(
+                    field_name=field_name,
+                    field_loader=field_meta["loader"],
+                    cmap_name=field_meta["cmap"],
+                    comps_to_plot=comps_to_plot,
+                    axes_to_slice=axes_to_slice,
+                    fig_dir=str(fig_dir),
+                    dataset_dir=str(dataset_dir),
+                    index_width=index_width,
+                    verbose=False,
                 ),
             )
-    elif isinstance(field, field_types.ScalarField):
-        data_items = [
-            DataItem(
-                data_3d=field.data,
-                label=snapshot.field_args.field_name,
-            ),
-        ]
-    else:
-        raise ValueError(f"{snapshot.field_args.field_name} is an unrecognised field type.")
-    fig, axs_grid = helpers.create_figure(
-        num_rows=len(data_items),
-        num_cols=len(snapshot.axes_to_slice),
-        add_cbar_space=True,
+    parallel_utils.run_in_parallel(
+        worker_func=_plot_dataset_worker,
+        grouped_worker_args=grouped_worker_args,
+        timeout_seconds=120,
+        show_progress=True,
+        enable_plotting=True,
     )
-    for row_index, data_item in enumerate(data_items):
-        for col_index, axis_to_slice in enumerate(snapshot.axes_to_slice):
-            ax = axs_grid[row_index][col_index]
-            field_slice = slice_field(
-                data_3d=data_item.data_3d,
-                axis_to_slice=axis_to_slice,
-            )
-            _plot_slice(
-                ax=ax,
-                sim_time=sim_time,
-                field_slice=field_slice,
-                uniform_domain=uniform_domain,
-                axis_to_slice=axis_to_slice,
-                label=data_item.label,
-                cmap_name=snapshot.field_args.cmap_name,
-            )
-    num_rows = len(axs_grid)
-    for row_index in range(num_rows):
-        for col_index, axis_to_slice in enumerate(snapshot.axes_to_slice):
-            ax = axs_grid[row_index][col_index]
-            xlabel, ylabel = get_slice_labels(axis_to_slice)
-            if (num_rows == 1) or (row_index == num_rows - 1):
-                ax.set_xlabel(xlabel)
-            ax.set_ylabel(ylabel)
-    fig_name = f"{snapshot.field_args.field_name}_slice_{dataset_index:0{snapshot.index_width}d}.png"
-    fig_path = snapshot.fig_dir / fig_name
-    plot_manager.save_figure(fig=fig, fig_path=fig_path, verbose=snapshot.verbose)
 
 
 ##
-## === OPERATOR CLASS
+## === ORCHESTRATOR
 ##
 
 
-class Plotter:
-
-    VALID_FIELDS = {
-        "rho": {
-            "loader": "load_density_sfield",
-            "cmap": "Greys",
-        },
-        "vel": {
-            "loader": "load_velocity_vfield",
-            "cmap": "Oranges",
-        },
-        "mag": {
-            "loader": "load_magnetic_vfield",
-            "cmap": "Blues",
-        },
-        "Etot": {
-            "loader": "load_total_energy_sfield",
-            "cmap": "cividis",
-        },
-        "Ekin": {
-            "loader": "load_kinetic_energy_sfield",
-            "cmap": "magma",
-        },
-        "Ekin_div": {
-            "loader": "load_div_kinetic_energy_sfield",
-            "cmap": "magma",
-        },
-        "Ekin_sol": {
-            "loader": "load_sol_kinetic_energy_sfield",
-            "cmap": "magma",
-        },
-        "Emag": {
-            "loader": "load_magnetic_energy_sfield",
-            "cmap": "plasma",
-        },
-        "Eint": {
-            "loader": "load_internal_energy_sfield",
-            "cmap": "magma",
-        },
-        "pressure": {
-            "loader": "load_pressure_sfield",
-            "cmap": "Purples",
-        },
-        "divb": {
-            "loader": "load_divb_sfield",
-            "cmap": "bwr",
-        },
-    }
+class PlotInterface:
 
     def __init__(
         self,
         *,
         input_dir: Path,
         fields_to_plot: list[str],
-        components_to_plot: list[Axis],
-        axes_to_slice: list[Axis],
+        comps_to_plot: tuple[Axis, ...] | list[Axis] | None,
+        axes_to_slice: tuple[Axis, ...] | list[Axis] | None,
         use_parallel: bool = True,
         animate_only: bool = False,
     ):
-        valid_fields = set(self.VALID_FIELDS.keys())
+        valid_fields = set(utils.QUOKKA_FIELDS_LOOKUP.keys())
         if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
             raise ValueError(f"Provide one or more field to plot (via -f) from: {sorted(valid_fields)}")
         valid_axes: set[Axis] = {"x", "y", "z"}
-        if not components_to_plot: components_to_plot = ["x", "y", "z"]
-        elif not set(components_to_plot).issubset(valid_axes):
+        if comps_to_plot is None: comps_to_plot = ("x", "y", "z")
+        elif not set(comps_to_plot).issubset(valid_axes):
             raise ValueError("Provide one or more components (via -c) from: x, y, z")
-        if not axes_to_slice: axes_to_slice = ["x", "y", "z"]
+        if axes_to_slice is None: axes_to_slice = ("x", "y", "z")
         elif not set(axes_to_slice).issubset(valid_axes):
             raise ValueError("Provide one or more axes (via -a) from: x, y, z")
         self.input_dir = Path(input_dir)
         self.fields_to_plot = fields_to_plot
-        self.components_to_plot = components_to_plot
+        self.comps_to_plot = comps_to_plot
         self.axes_to_slice = axes_to_slice
         self.use_parallel = bool(use_parallel)
         self.animate_only = bool(animate_only)
 
     def run(self) -> None:
-        dataset_dirs = helpers.resolve_dataset_dirs(self.input_dir)
-        if not dataset_dirs: return
-        self.index_width = get_max_index_width(dataset_dirs)
-        fig_dir = dataset_dirs[0].parent
+        plotting_setup = self._resolve_plotting_setup()
+        if plotting_setup is None:
+            return
         if not self.animate_only:
-            snapshots = self._prepare_snapshots(
-                dataset_dirs=dataset_dirs,
-                fig_dir=fig_dir,
-            )
-            if not snapshots: return
-            if self.use_parallel and len(snapshots) > 5:
-                parallel_utils.run_in_parallel(
-                    func=_plot_snapshot,
-                    grouped_args=snapshots,
-                    timeout_seconds=120,
-                    show_progress=True,
-                    enable_plotting=True,
+            total_jobs = len(plotting_setup.dataset_dirs) * len(self.fields_to_plot)
+            if self.use_parallel and total_jobs > 5:
+                render_fields_in_parallel(
+                    fields_to_plot=self.fields_to_plot,
+                    comps_to_plot=type_utils.as_tuple(seq_obj=self.comps_to_plot),
+                    axes_to_slice=type_utils.as_tuple(seq_obj=self.axes_to_slice),
+                    dataset_dirs=plotting_setup.dataset_dirs,
+                    fig_dir=plotting_setup.fig_dir,
+                    index_width=plotting_setup.index_width,
                 )
             else:
-                [_plot_snapshot(snapshot) for snapshot in snapshots]
+                render_fields_in_serial(
+                    fields_to_plot=self.fields_to_plot,
+                    comps_to_plot=type_utils.as_tuple(seq_obj=self.comps_to_plot),
+                    axes_to_slice=type_utils.as_tuple(seq_obj=self.axes_to_slice),
+                    dataset_dirs=plotting_setup.dataset_dirs,
+                    fig_dir=plotting_setup.fig_dir,
+                    index_width=plotting_setup.index_width,
+                )
+        self._animate_fields(fig_dir=plotting_setup.fig_dir)
+
+    def _resolve_plotting_setup(self) -> PlottingSetup | None:
+        dataset_dirs = utils.resolve_dataset_dirs(self.input_dir)
+        if not dataset_dirs:
+            return None
+        fig_dir = dataset_dirs[0].parent
+        index_width = utils.get_max_index_width(dataset_dirs)
+        return PlottingSetup(
+            dataset_dirs=dataset_dirs,
+            fig_dir=fig_dir,
+            index_width=index_width,
+        )
+
+    def _animate_fields(self, *, fig_dir: Path) -> None:
         for field_name in self.fields_to_plot:
             fig_paths = io_manager.ItemFilter(
                 prefix=f"{field_name}_slice_",
@@ -366,42 +494,22 @@ class Plotter:
                 include_folders=False,
                 include_files=True,
             ).filter(directory=fig_dir)
-            if len(fig_paths) < 3: continue
+            if len(fig_paths) < 3:
+                log_manager.log_hint(
+                    text=(
+                        f"Skipping animation for '{field_name}': "
+                        f"only found {len(fig_paths)} frame(s), but need at least 3."
+                    ),
+                )
+                continue
             mp4_path = Path(fig_dir) / f"{field_name}_slices.mp4"
             plot_manager.animate_pngs_to_mp4(
                 frames_dir=fig_dir,
                 mp4_path=mp4_path,
                 pattern=f"{field_name}_slice_*.png",
-                fps=30,
+                fps=60,
                 timeout_seconds=120,
             )
-
-    def _prepare_snapshots(
-        self,
-        dataset_dirs: list[Path],
-        fig_dir: Path,
-    ) -> list[SnapshotArgs]:
-        snapshots: list[SnapshotArgs] = []
-        for field_name in self.fields_to_plot:
-            field_meta = self.VALID_FIELDS[field_name]
-            field_args = FieldArgs(
-                field_name=field_name,
-                field_loader=field_meta["loader"],
-                cmap_name=field_meta["cmap"],
-            )
-            for dataset_dir in dataset_dirs:
-                snapshots.append(
-                    SnapshotArgs(
-                        fig_dir=Path(fig_dir),
-                        dataset_dir=Path(dataset_dir),
-                        field_args=field_args,
-                        components_to_plot=self.components_to_plot,
-                        axes_to_slice=self.axes_to_slice,
-                        index_width=self.index_width,
-                        verbose=False,
-                    ),
-                )
-        return snapshots
 
 
 ##
@@ -410,16 +518,16 @@ class Plotter:
 
 
 def main():
-    args = helpers.get_user_input()
-    plotter = Plotter(
-        input_dir=args.dir,
-        fields_to_plot=args.fields,
-        components_to_plot=args.components,
-        axes_to_slice=args.axes,
+    user_args = utils.get_user_args()
+    field_plotter = PlotInterface(
+        input_dir=user_args.dir,
+        fields_to_plot=user_args.fields,
+        comps_to_plot=user_args.comps,
+        axes_to_slice=user_args.axes,
         use_parallel=True,
-        animate_only=args.animate_only,
+        animate_only=user_args.animate_only,
     )
-    plotter.run()
+    field_plotter.run()
 
 
 ##
