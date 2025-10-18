@@ -25,13 +25,6 @@ LOOKUP_AXIS_INDEX: dict[Axis, int] = {"x": 0, "y": 1, "z": 2}
 
 
 @dataclass(frozen=True)
-class PlottingSetup:
-    dataset_dirs: list[Path]
-    fig_dir: Path
-    index_width: int
-
-
-@dataclass(frozen=True)
 class FieldArgs:
     field_name: str
     field_loader: str
@@ -58,7 +51,7 @@ class Dataset:
     @property
     def sim_time(self) -> float:
         sim_time = self.field.sim_time
-        type_utils.assert_finite_float(
+        type_utils.ensure_finite_float(
             var_obj=sim_time,
             var_name="sim_time",
             allow_none=False,
@@ -221,8 +214,8 @@ class FieldPlotter:
     ) -> Dataset:
         with load_dataset.QuokkaDataset(dataset_dir=dataset_dir, verbose=verbose) as ds:
             uniform_domain = ds.load_uniform_domain()
-            loader_function = getattr(ds, self.field_args.field_loader)
-            field = loader_function()  # ScalarField or VectorField
+            loader_func = getattr(ds, self.field_args.field_loader)
+            field = loader_func()  # ScalarField or VectorField
         return Dataset(
             uniform_domain=uniform_domain,
             field=field,
@@ -255,14 +248,14 @@ class FieldPlotter:
     def _plot_field_comps(
         self,
         *,
-        axes_grid,
+        axs_grid,
         field_comps: list[FieldComp],
         uniform_domain: field_types.UniformDomain,
         sim_time: float,
     ) -> None:
         for row_index, field_comp in enumerate(field_comps):
             for col_index, axis_to_slice in enumerate(self.axes_to_slice):
-                ax = axes_grid[row_index][col_index]
+                ax = axs_grid[row_index][col_index]
                 field_slice = slice_field(
                     data_3d=field_comp.data_3d,
                     axis_to_slice=axis_to_slice,
@@ -279,12 +272,12 @@ class FieldPlotter:
     def _label_axes(
         self,
         *,
-        axes_grid,
+        axs_grid,
     ) -> None:
-        num_rows = len(axes_grid)
+        num_rows = len(axs_grid)
         for row_index in range(num_rows):
             for col_index, axis_to_slice in enumerate(self.axes_to_slice):
-                ax = axes_grid[row_index][col_index]
+                ax = axs_grid[row_index][col_index]
                 x_label_str, y_label_str = get_slice_labels(axis_to_slice)
                 if (num_rows == 1) or (row_index == num_rows - 1):
                     ax.set_xlabel(x_label_str)
@@ -301,18 +294,18 @@ class FieldPlotter:
         dataset = self._load_dataset(dataset_dir=dataset_dir, verbose=verbose)
         dataset_index = int(utils.get_dataset_index(dataset_dir))
         field_comps = self._get_field_comps(field=dataset.field)
-        fig, axes_grid = utils.create_figure(
+        fig, axs_grid = utils.create_figure(
             num_rows=len(field_comps),
             num_cols=len(self.axes_to_slice),
             add_cbar_space=True,
         )
         self._plot_field_comps(
-            axes_grid=axes_grid,
+            axs_grid=axs_grid,
             field_comps=field_comps,
             uniform_domain=dataset.uniform_domain,
             sim_time=dataset.sim_time,
         )
-        self._label_axes(axes_grid=axes_grid)
+        self._label_axes(axs_grid=axs_grid)
         figure_name = f"{self.field_args.field_name}_slice_{dataset_index:0{index_width}d}.png"
         figure_path = fig_dir / figure_name
         plot_manager.save_figure(
@@ -324,7 +317,7 @@ class FieldPlotter:
 
 def render_fields_in_serial(
     *,
-    fields_to_plot: list[str],
+    fields_to_plot: tuple[str, ...],
     comps_to_plot: tuple[Axis, ...],
     axes_to_slice: tuple[Axis, ...],
     dataset_dirs: list[Path],
@@ -355,12 +348,7 @@ def render_fields_in_serial(
 def _plot_dataset_worker(
     *args,
 ) -> None:
-    if len(args) == 1 and isinstance(args[0], WorkerArgs):
-        worker_args = args[0]
-    elif len(args) == len(WorkerArgs._fields):
-        worker_args = WorkerArgs(*args)
-    else:
-        raise TypeError(f"Expected WorkerArgs or {len(WorkerArgs._fields)} args, but only got {len(args)}.")
+    worker_args = WorkerArgs(*args)
     field_args = FieldArgs(
         field_name=worker_args.field_name,
         field_loader=worker_args.field_loader,
@@ -381,7 +369,7 @@ def _plot_dataset_worker(
 
 def render_fields_in_parallel(
     *,
-    fields_to_plot: list[str],
+    fields_to_plot: tuple[str, ...],
     comps_to_plot: tuple[Axis, ...],
     axes_to_slice: tuple[Axis, ...],
     dataset_dirs: list[Path],
@@ -425,7 +413,7 @@ class PlotInterface:
         self,
         *,
         input_dir: Path,
-        fields_to_plot: list[str],
+        fields_to_plot: tuple[str, ...] | list[str] | None,
         comps_to_plot: tuple[Axis, ...] | list[Axis] | None,
         axes_to_slice: tuple[Axis, ...] | list[Axis] | None,
         use_parallel: bool = True,
@@ -435,58 +423,26 @@ class PlotInterface:
         if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
             raise ValueError(f"Provide one or more field to plot (via -f) from: {sorted(valid_fields)}")
         valid_axes: set[Axis] = {"x", "y", "z"}
-        if comps_to_plot is None: comps_to_plot = ("x", "y", "z")
+        if comps_to_plot is None:
+            comps_to_plot = ("x", "y", "z")
         elif not set(comps_to_plot).issubset(valid_axes):
             raise ValueError("Provide one or more components (via -c) from: x, y, z")
-        if axes_to_slice is None: axes_to_slice = ("x", "y", "z")
+        if axes_to_slice is None:
+            axes_to_slice = ("x", "y", "z")
         elif not set(axes_to_slice).issubset(valid_axes):
             raise ValueError("Provide one or more axes (via -a) from: x, y, z")
         self.input_dir = Path(input_dir)
-        self.fields_to_plot = fields_to_plot
-        self.comps_to_plot = comps_to_plot
-        self.axes_to_slice = axes_to_slice
+        self.fields_to_plot = type_utils.as_tuple(seq_obj=fields_to_plot)
+        self.comps_to_plot = type_utils.as_tuple(seq_obj=comps_to_plot)
+        self.axes_to_slice = type_utils.as_tuple(seq_obj=axes_to_slice)
         self.use_parallel = bool(use_parallel)
         self.animate_only = bool(animate_only)
 
-    def run(self) -> None:
-        plotting_setup = self._resolve_plotting_setup()
-        if plotting_setup is None:
-            return
-        if not self.animate_only:
-            total_jobs = len(plotting_setup.dataset_dirs) * len(self.fields_to_plot)
-            if self.use_parallel and total_jobs > 5:
-                render_fields_in_parallel(
-                    fields_to_plot=self.fields_to_plot,
-                    comps_to_plot=type_utils.as_tuple(seq_obj=self.comps_to_plot),
-                    axes_to_slice=type_utils.as_tuple(seq_obj=self.axes_to_slice),
-                    dataset_dirs=plotting_setup.dataset_dirs,
-                    fig_dir=plotting_setup.fig_dir,
-                    index_width=plotting_setup.index_width,
-                )
-            else:
-                render_fields_in_serial(
-                    fields_to_plot=self.fields_to_plot,
-                    comps_to_plot=type_utils.as_tuple(seq_obj=self.comps_to_plot),
-                    axes_to_slice=type_utils.as_tuple(seq_obj=self.axes_to_slice),
-                    dataset_dirs=plotting_setup.dataset_dirs,
-                    fig_dir=plotting_setup.fig_dir,
-                    index_width=plotting_setup.index_width,
-                )
-        self._animate_fields(fig_dir=plotting_setup.fig_dir)
-
-    def _resolve_plotting_setup(self) -> PlottingSetup | None:
-        dataset_dirs = utils.resolve_dataset_dirs(self.input_dir)
-        if not dataset_dirs:
-            return None
-        fig_dir = dataset_dirs[0].parent
-        index_width = utils.get_max_index_width(dataset_dirs)
-        return PlottingSetup(
-            dataset_dirs=dataset_dirs,
-            fig_dir=fig_dir,
-            index_width=index_width,
-        )
-
-    def _animate_fields(self, *, fig_dir: Path) -> None:
+    def _animate_fields(
+        self,
+        *,
+        fig_dir: Path,
+    ) -> None:
         for field_name in self.fields_to_plot:
             fig_paths = io_manager.ItemFilter(
                 prefix=f"{field_name}_slice_",
@@ -511,9 +467,39 @@ class PlotInterface:
                 timeout_seconds=120,
             )
 
+    def run(
+        self,
+    ) -> None:
+        dataset_dirs = utils.resolve_dataset_dirs(self.input_dir)
+        if not dataset_dirs:
+            return
+        fig_dir = dataset_dirs[0].parent
+        index_width = utils.get_max_index_width(dataset_dirs)
+        if not self.animate_only:
+            total_jobs = len(dataset_dirs) * len(self.fields_to_plot)
+            if self.use_parallel and total_jobs > 5:
+                render_fields_in_parallel(
+                    fields_to_plot=self.fields_to_plot,
+                    comps_to_plot=self.comps_to_plot,
+                    axes_to_slice=self.axes_to_slice,
+                    dataset_dirs=dataset_dirs,
+                    fig_dir=fig_dir,
+                    index_width=index_width,
+                )
+            else:
+                render_fields_in_serial(
+                    fields_to_plot=self.fields_to_plot,
+                    comps_to_plot=self.comps_to_plot,
+                    axes_to_slice=self.axes_to_slice,
+                    dataset_dirs=dataset_dirs,
+                    fig_dir=fig_dir,
+                    index_width=index_width,
+                )
+        self._animate_fields(fig_dir=fig_dir)
+
 
 ##
-## === MAIN PROGRAM
+## === PROGRAM MAIN
 ##
 
 
@@ -524,8 +510,8 @@ def main():
         fields_to_plot=user_args.fields,
         comps_to_plot=user_args.comps,
         axes_to_slice=user_args.axes,
-        use_parallel=True,
         animate_only=user_args.animate_only,
+        use_parallel=True,
     )
     field_plotter.run()
 

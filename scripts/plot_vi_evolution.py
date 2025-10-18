@@ -7,12 +7,12 @@
 import numpy
 from pathlib import Path
 from dataclasses import dataclass
-from jormi.utils import parallel_utils
+from jormi.utils import parallel_utils, array_utils
 from jormi.ww_data import fit_data
 from jormi.ww_plots import plot_manager, annotate_axis
 from jormi.ww_fields import field_types, field_operators
 from ww_quokka_sims.sim_io import load_dataset
-from utils import helpers
+import utils
 
 ##
 ## === DATA TYPES
@@ -20,7 +20,7 @@ from utils import helpers
 
 
 @dataclass(frozen=True)
-class LoaderArgs:
+class FieldArgs:
     dataset_dir: Path
     field_name: str
     field_loader: str
@@ -30,184 +30,226 @@ class LoaderArgs:
 @dataclass(frozen=True)
 class DataPoint:
     sim_time: float
-    vi_quantity: float
+    vi_value: float
 
 
 @dataclass(frozen=True)
-class TimeSeries:
-    sim_times: list[float]
-    vi_quantities: list[float]
+class DataSeries:
+    points: list[DataPoint]
 
+    @property
+    def num_points(
+        self,
+    ) -> int:
+        return len(self.points)
 
-@dataclass(frozen=True)
-class PlotterArgs:
-    fig_dir: Path
-    field_name: str
-    time_series: TimeSeries
-    color: str
-    verbose: bool
+    def get_sorted_arrays(
+        self,
+    ) -> tuple[numpy.ndarray, numpy.ndarray]:
+        if not self.points:
+            return (
+                numpy.asarray([], dtype=float),
+                numpy.asarray([], dtype=float),
+            )
+        sorted_points = sorted(self.points, key=lambda point: point.sim_time)
+        x_array = array_utils.as_1d([point.sim_time for point in sorted_points])
+        y_array = array_utils.as_1d([point.vi_value for point in sorted_points])
+        return (
+            x_array,
+            y_array,
+        )
 
 
 ##
-## === PLOTTING
+## === OPERATOR CLASSES
 ##
 
 
-def add_fit_summary(
-    ax,
-    fit_summary: fit_data.FitSummary,
-    *,
-    x_pos: float = 0.95,
-    y_pos: float = 0.95,
-    x_alignment: str = "right",
-    y_alignment: str = "top",
-    color: str = "black",
-    fontsize: float = 12,
-    with_box: bool = True,
-) -> None:
+class LoadDataSeries:
 
-    def _fmt(stat) -> str:
-        return f"{stat.value:.3e}" + (f" +/- {stat.sigma:.1e}" if stat.sigma is not None else "")
+    def __init__(
+        self,
+        *,
+        dataset_dirs: list[Path],
+        field_name: str,
+        field_loader: str,
+        verbose: bool = False,
+        use_parallel: bool = True,
+    ):
+        self.dataset_dirs = list(sorted(dataset_dirs))
+        self.field_name = field_name
+        self.field_loader = field_loader
+        self.verbose = bool(verbose)
+        self.use_parallel = bool(use_parallel)
 
-    slope = fit_summary.get_parameter("slope")
-    intercept = fit_summary.get_parameter("intercept")
-    label = f"slope: {_fmt(slope)}\nintercept: {_fmt(intercept)}"
-    annotate_axis.add_text(
-        ax=ax,
-        x_pos=x_pos,
-        y_pos=y_pos,
-        label=label,
-        x_alignment=x_alignment,
-        y_alignment=y_alignment,
-        fontsize=fontsize,
-        font_color=color,
-        add_box=with_box,
-        box_alpha=0.85,
-        face_color="white",
-        edge_color=color,
-    )
-
-
-def _load_snapshot(
-    loader_args: LoaderArgs,
-) -> DataPoint:
-    with load_dataset.QuokkaDataset(dataset_dir=loader_args.dataset_dir, verbose=loader_args.verbose) as ds:
-        uniform_domain = ds.load_uniform_domain()
-        field_loader = getattr(ds, loader_args.field_loader)
-        field = field_loader()  # expect ScalarField
-    if not isinstance(field, field_types.ScalarField):
-        raise ValueError(f"{loader_args.field_name} is not a scalar field (got {type(field).__name__}).")
-    assert field.sim_time is not None
-    sim_time = float(field.sim_time)
-    vi_quantity = float(
-        field_operators.compute_sfield_volume_integral(
+    @staticmethod
+    def _load_snapshot(
+        *,
+        field_args: FieldArgs,
+    ) -> DataPoint:
+        with load_dataset.QuokkaDataset(
+                dataset_dir=field_args.dataset_dir,
+                verbose=field_args.verbose,
+        ) as ds:
+            uniform_domain = ds.load_uniform_domain()
+            loader_func = getattr(ds, field_args.field_loader)
+            field = loader_func()  # should be ScalarField
+        field_types.ensure_sfield(sfield=field)
+        assert field.sim_time is not None
+        sim_time = float(field.sim_time)
+        vi_value = field_operators.compute_sfield_volume_integral(
             sfield=field,
             uniform_domain=uniform_domain,
-        ),
-    )
-    return DataPoint(
-        sim_time=sim_time,
-        vi_quantity=vi_quantity,
-    )
+        )
+        return DataPoint(
+            sim_time=sim_time,
+            vi_value=vi_value,
+        )
+
+    def run(
+        self,
+    ) -> DataSeries:
+        grouped_field_args: list[FieldArgs] = [
+            FieldArgs(
+                dataset_dir=Path(dataset_dir),
+                field_name=self.field_name,
+                field_loader=self.field_loader,
+                verbose=False,
+            ) for dataset_dir in self.dataset_dirs
+        ]
+        if not grouped_field_args:
+            return DataSeries(points=[])
+        if self.use_parallel and (len(grouped_field_args) > 5):
+            data_points: list[DataPoint] = parallel_utils.run_in_parallel(
+                worker_func=LoadDataSeries._load_snapshot,
+                grouped_worker_args=grouped_field_args,
+                timeout_seconds=120,
+                show_progress=True,
+                enable_plotting=True,
+            )
+        else:
+            data_points = [
+                LoadDataSeries._load_snapshot(field_args=field_args) for field_args in grouped_field_args
+            ]
+        return DataSeries(points=data_points)
 
 
-def _plot_evolution(
-    plotter_args: PlotterArgs,
-) -> None:
-    fig, axs_grid = plot_manager.create_figure()
-    ax = axs_grid[0, 0]
-    x_array = numpy.asarray(plotter_args.time_series.sim_times, dtype=float)
-    y_array = numpy.asarray(plotter_args.time_series.vi_quantities, dtype=float)
-    ax.plot(
-        x_array,
-        y_array,
-        color=plotter_args.color,
-        marker="o",
-        ms=6,
-        ls="-",
-        lw=1.5,
-    )
-    num_points = len(x_array)
-    if num_points >= 3:
-        fit_end_index = 3 * num_points // 4
-        fit_data_series = fit_data.DataSeries(
-            x_array=x_array[:fit_end_index],
-            y_array=y_array[:fit_end_index],
-        )
-        fit_summary = fit_data.fit_linear_model(fit_data_series)
-        intercept_value = fit_summary.get_parameter("intercept").value
-        slope_value = fit_summary.get_parameter("slope").value
-        y_min = intercept_value + slope_value * x_array[0]
-        y_max = intercept_value + slope_value * x_array[-1]
-        ax.plot(
-            [x_array[0], x_array[-1]],
-            [y_min, y_max],
-            linestyle="--",
-            linewidth=1.5,
-            color=plotter_args.color,
-            alpha=0.9,
-        )
-        add_fit_summary(
+class RenderDataSeries:
+
+    def __init__(
+        self,
+        *,
+        fig_dir: Path,
+        field_name: str,
+        color: str,
+        verbose: bool = False,
+    ):
+        self.fig_dir = Path(fig_dir)
+        self.field_name = field_name
+        self.color = color
+        self.verbose = bool(verbose)
+
+    @staticmethod
+    def _annotate_fit(
+        *,
+        ax,
+        slope_stat,
+        intercept_stat,
+        color: str = "black",
+        x_pos: float = 0.95,
+        y_pos: float = 0.95,
+        x_alignment: str = "right",
+        y_alignment: str = "top",
+        fontsize: float = 12,
+        with_box: bool = True,
+    ) -> None:
+
+        def _fmt(stat) -> str:
+            return f"{stat.value:.3e}" + (
+                f" +/- {stat.sigma:.1e}" if getattr(stat, "sigma", None) is not None else ""
+            )
+
+        label = f"slope: {_fmt(slope_stat)} intercept: {_fmt(intercept_stat)}"
+        annotate_axis.add_text(
             ax=ax,
-            fit_summary=fit_summary,
-            color=plotter_args.color,
+            x_pos=x_pos,
+            y_pos=y_pos,
+            label=label,
+            x_alignment=x_alignment,
+            y_alignment=y_alignment,
+            fontsize=fontsize,
+            font_color=color,
+            add_box=with_box,
+            box_alpha=0.85,
+            face_color="white",
+            edge_color=color,
         )
-    ax.set_xlabel("time")
-    ax.set_ylabel(plotter_args.field_name)
-    fig_name = f"{plotter_args.field_name}_time_evolution.png"
-    fig_path = plotter_args.fig_dir / fig_name
-    plot_manager.save_figure(
-        fig=fig,
-        fig_path=fig_path,
-        verbose=plotter_args.verbose,
-    )
+
+    def _fit_linear_and_plot(
+        self,
+        *,
+        ax,
+        x_array: numpy.ndarray,
+        y_array: numpy.ndarray,
+    ) -> None:
+        num_points = int(x_array.size)
+        if num_points < 3: return
+        end_index = max(3, 3 * num_points // 4)
+        ds = fit_data.DataSeries(
+            x_array=x_array[:end_index],
+            y_array=y_array[:end_index],
+        )
+        fit_summary = fit_data.fit_linear_model(ds)
+        slope_stat = fit_summary.get_parameter("slope")
+        intercept_stat = fit_summary.get_parameter("intercept")
+        slope_value = slope_stat.value
+        intercept_value = intercept_stat.value
+        x0, x1 = float(x_array[0]), float(x_array[-1])
+        y0 = intercept_value + slope_value * x0
+        y1 = intercept_value + slope_value * x1
+        ax.plot([x0, x1], [y0, y1], linestyle="--", linewidth=1.5, color=self.color, alpha=0.9)
+        RenderDataSeries._annotate_fit(
+            ax=ax,
+            slope_stat=slope_stat,
+            intercept_stat=intercept_stat,
+            color=self.color,
+        )
+
+    def run(
+        self,
+        *,
+        data_series: DataSeries,
+    ) -> None:
+        fig, axs_grid = plot_manager.create_figure()
+        ax = axs_grid[0, 0]
+        x_array, y_array = data_series.get_sorted_arrays()
+        if x_array.size == 0:
+            annotate_axis.add_text(
+                ax=ax,
+                x_pos=0.5,
+                y_pos=0.5,
+                label="no data",
+                x_alignment="center",
+                y_alignment="center",
+            )
+            return
+        ax.plot(x_array, y_array, color=self.color, marker="o", ms=6, ls="-", lw=1.5)
+        self._fit_linear_and_plot(
+            ax=ax,
+            x_array=x_array,
+            y_array=y_array,
+        )
+        ax.set_xlabel("time")
+        ax.set_ylabel(self.field_name)
+        fig_path = self.fig_dir / f"{self.field_name}_time_evolution.png"
+        plot_manager.save_figure(
+            fig=fig,
+            fig_path=fig_path,
+            verbose=self.verbose,
+        )
 
 
-##
-## === OPERATOR CLASS
-##
-
-
-class Plotter:
-
-    VALID_FIELDS = {
-        "rho": {
-            "loader": "load_density_sfield",
-            "color": "black",
-        },
-        "Etot": {
-            "loader": "load_total_energy_sfield",
-            "color": "black",
-        },
-        "Ekin": {
-            "loader": "load_kinetic_energy_sfield",
-            "color": "darkorange",
-        },
-        "Ekin_div": {
-            "loader": "load_div_kinetic_energy_sfield",
-            "color": "darkorange",
-        },
-        "Ekin_sol": {
-            "loader": "load_sol_kinetic_energy_sfield",
-            "color": "darkorange",
-        },
-        "Emag": {
-            "loader": "load_magnetic_energy_density_sfield",
-            "color": "red",
-        },
-        "Eint": {
-            "loader": "load_internal_energy_sfield",
-            "color": "sandybrown",
-        },
-        "pressure": {
-            "loader": "load_pressure_sfield",
-            "color": "purple",
-        },
-        "divb": {
-            "loader": "load_divb_sfield",
-            "color": "orange",
-        },
-    }
+class PlotInterface:
 
     def __init__(
         self,
@@ -216,70 +258,53 @@ class Plotter:
         fields_to_plot: list[str],
         use_parallel: bool = True,
     ):
-        valid_fields = set(self.VALID_FIELDS.keys())
+        valid_fields = set(utils.QUOKKA_FIELDS_LOOKUP.keys())
         if (not fields_to_plot) or (not set(fields_to_plot).issubset(valid_fields)):
             raise ValueError(f"Provide one or more fields to plot (via -f) from: {sorted(valid_fields)}")
         self.input_dir = Path(input_dir)
         self.fields_to_plot = fields_to_plot
         self.use_parallel = bool(use_parallel)
 
-    def run(self) -> None:
-        dataset_dirs = helpers.resolve_dataset_dirs(self.input_dir)
-        if not dataset_dirs: return
+    def run(
+        self,
+    ) -> None:
+        dataset_dirs = utils.resolve_dataset_dirs(self.input_dir)
+        if not dataset_dirs:
+            return
+        fig_dir = Path(dataset_dirs[0]).parent
         dataset_dirs = sorted(dataset_dirs)
-        fig_dir = dataset_dirs[0].parent
         for field_name in self.fields_to_plot:
-            field_meta = self.VALID_FIELDS[field_name]
-            field_loader = field_meta["loader"]
-            color = field_meta["color"]
-            grouped_loader_args: list[LoaderArgs] = [
-                LoaderArgs(
-                    dataset_dir=Path(dataset_dir),
-                    field_name=field_name,
-                    field_loader=field_loader,
-                    verbose=False,
-                ) for dataset_dir in dataset_dirs
-            ]
-            if not grouped_loader_args: continue
-            if self.use_parallel and len(grouped_loader_args) > 5:
-                data_points: list[DataPoint] = parallel_utils.run_in_parallel(
-                    func=_load_snapshot,
-                    grouped_args=grouped_loader_args,
-                    timeout_seconds=120,
-                    show_progress=True,
-                    enable_plotting=True,
-                )
-            else:
-                data_points: list[DataPoint] = [_load_snapshot(args) for args in grouped_loader_args]
-            data_points = sorted(data_points, key=lambda data_point: data_point.sim_time)
-            time_series = TimeSeries(
-                sim_times=[data_point.sim_time for data_point in data_points],
-                vi_quantities=[data_point.vi_quantity for data_point in data_points],
+            field_meta = utils.QUOKKA_FIELDS_LOOKUP[field_name]
+            load_data_series = LoadDataSeries(
+                dataset_dirs=dataset_dirs,
+                field_name=field_name,
+                field_loader=field_meta["loader"],
+                use_parallel=self.use_parallel,
+                verbose=False,
             )
-            _plot_evolution(
-                PlotterArgs(
-                    fig_dir=Path(fig_dir),
-                    time_series=time_series,
-                    field_name=field_name,
-                    color=color,
-                    verbose=True,
-                ),
+            data_series = load_data_series.run()
+            render_data_series = RenderDataSeries(
+                fig_dir=fig_dir,
+                field_name=field_name,
+                color=field_meta["color"],
+                verbose=True,
             )
+            render_data_series.run(data_series=data_series)
 
 
 ##
-## === MAIN PROGRAM
+## === PROGRAM MAIN
 ##
 
 
 def main():
-    args = helpers.get_user_input()
-    plotter = Plotter(
+    args = utils.get_user_args()
+    plot_interface = PlotInterface(
         input_dir=args.dir,
         fields_to_plot=args.fields,
         use_parallel=True,
     )
-    plotter.run()
+    plot_interface.run()
 
 
 ##
