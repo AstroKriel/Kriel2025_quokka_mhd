@@ -476,8 +476,7 @@ class PlotInterface:
         fig_dir = dataset_dirs[0].parent
         index_width = utils.get_max_index_width(dataset_dirs)
         if not self.animate_only:
-            total_jobs = len(dataset_dirs) * len(self.fields_to_plot)
-            if self.use_parallel and total_jobs > 5:
+            if self.use_parallel and (len(dataset_dirs) > 5):
                 render_fields_in_parallel(
                     fields_to_plot=self.fields_to_plot,
                     comps_to_plot=self.comps_to_plot,
