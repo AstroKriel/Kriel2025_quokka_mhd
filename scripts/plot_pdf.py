@@ -22,6 +22,10 @@ import utils
 Axis = Literal["x", "y", "z"]
 LOOKUP_AXIS_INDEX: dict[Axis, int] = {"x": 0, "y": 1, "z": 2}
 
+##
+## === DATA CLASSES
+##
+
 
 @dataclass(frozen=True)
 class PDFData:
@@ -77,7 +81,7 @@ class PDFData:
 
 
 ##
-## === LOADER
+## === OPERATOR CLASSES
 ##
 
 
@@ -183,11 +187,6 @@ class ComputePDFs:
             field_pdfs.append(pdf)
         field_pdfs.sort(key=lambda pdf: pdf.sim_time)
         return field_pdfs
-
-
-##
-## === RENDERER
-##
 
 
 class RenderPDFs:
@@ -306,12 +305,7 @@ class RenderPDFs:
         )
 
 
-##
-## === ORCHESTRATOR
-##
-
-
-class PlotInterface:
+class ScriptInterface:
 
     def __init__(
         self,
@@ -365,14 +359,14 @@ class PlotInterface:
 
 def main():
     args = utils.get_user_args()
-    plotter = PlotInterface(
+    script_interface = ScriptInterface(
         input_dir=args.dir,
         fields_to_plot=args.fields,
         comps_to_plot=args.comps,
         num_bins=15,
         verbose=True,
     )
-    plotter.run()
+    script_interface.run()
 
 
 ##

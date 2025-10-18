@@ -23,6 +23,10 @@ Axis = Literal["x", "y", "z"]
 
 LOOKUP_AXIS_INDEX: dict[Axis, int] = {"x": 0, "y": 1, "z": 2}
 
+##
+## === DATA CLASSES
+##
+
 
 @dataclass(frozen=True)
 class FieldArgs:
@@ -32,13 +36,13 @@ class FieldArgs:
 
 
 class WorkerArgs(NamedTuple):
+    dataset_dir: str
     field_name: str
     field_loader: str
-    cmap_name: str
     comps_to_plot: tuple[Axis, ...]
     axes_to_slice: tuple[Axis, ...]
+    cmap_name: str
     fig_dir: str
-    dataset_dir: str
     index_width: int
     verbose: bool
 
@@ -138,65 +142,7 @@ def slice_field(
 
 
 ##
-## === PLOTTING PRIMITIVES
-##
-
-
-def plot_slice(
-    *,
-    ax,
-    sim_time: float,
-    field_slice: SlicedField,
-    label: str,
-    cmap_name: str,
-) -> None:
-    plot_data.plot_sfield_slice(
-        ax=ax,
-        field_slice=field_slice.data_2d,
-        axis_bounds=field_slice.axis_bounds,
-        cmap_name=cmap_name,
-        add_colorbar=True,
-        cbar_label=label,
-        cbar_side="right",
-        cbar_bounds=(field_slice.min_value, field_slice.max_value),
-    )
-    annotate_axis.add_text(
-        ax=ax,
-        x_pos=0.5,
-        y_pos=0.95,
-        x_alignment="center",
-        y_alignment="top",
-        label=f"({field_slice.min_value:.2e}, {field_slice.max_value:.2e})",
-        fontsize=16,
-        box_alpha=0.5,
-        add_box=True,
-    )
-    annotate_axis.add_text(
-        ax=ax,
-        x_pos=0.5,
-        y_pos=0.5,
-        x_alignment="center",
-        y_alignment="center",
-        label=rf"$t = {sim_time:.2f}$",
-        fontsize=16,
-        box_alpha=0.5,
-        add_box=True,
-    )
-    annotate_axis.add_text(
-        ax=ax,
-        x_pos=0.5,
-        y_pos=0.05,
-        x_alignment="center",
-        y_alignment="bottom",
-        label=field_slice.label,
-        fontsize=16,
-        box_alpha=0.5,
-        add_box=True,
-    )
-
-
-##
-## === PER-FIELD PLOTTER (stateful per field)
+## === OPERATOR CLASSES
 ##
 
 
@@ -205,6 +151,59 @@ class FieldPlotter:
     field_args: FieldArgs
     comps_to_plot: tuple[Axis, ...]
     axes_to_slice: tuple[Axis, ...]
+
+    @staticmethod
+    def plot_slice(
+        *,
+        ax,
+        sim_time: float,
+        field_slice: SlicedField,
+        label: str,
+        cmap_name: str,
+    ) -> None:
+        plot_data.plot_sfield_slice(
+            ax=ax,
+            field_slice=field_slice.data_2d,
+            axis_bounds=field_slice.axis_bounds,
+            cmap_name=cmap_name,
+            add_colorbar=True,
+            cbar_label=label,
+            cbar_side="right",
+            cbar_bounds=(field_slice.min_value, field_slice.max_value),
+        )
+        annotate_axis.add_text(
+            ax=ax,
+            x_pos=0.5,
+            y_pos=0.95,
+            x_alignment="center",
+            y_alignment="top",
+            label=f"({field_slice.min_value:.2e}, {field_slice.max_value:.2e})",
+            fontsize=16,
+            box_alpha=0.5,
+            add_box=True,
+        )
+        annotate_axis.add_text(
+            ax=ax,
+            x_pos=0.5,
+            y_pos=0.5,
+            x_alignment="center",
+            y_alignment="center",
+            label=rf"$t = {sim_time:.2f}$",
+            fontsize=16,
+            box_alpha=0.5,
+            add_box=True,
+        )
+        annotate_axis.add_text(
+            ax=ax,
+            x_pos=0.5,
+            y_pos=0.05,
+            x_alignment="center",
+            y_alignment="bottom",
+            label=field_slice.label,
+            fontsize=16,
+            box_alpha=0.5,
+            add_box=True,
+        )
 
     def _load_dataset(
         self,
@@ -261,7 +260,7 @@ class FieldPlotter:
                     axis_to_slice=axis_to_slice,
                     uniform_domain=uniform_domain,
                 )
-                plot_slice(
+                self.plot_slice(
                     ax=ax,
                     sim_time=sim_time,
                     field_slice=field_slice,
@@ -383,12 +382,12 @@ def render_fields_in_parallel(
             grouped_worker_args.append(
                 WorkerArgs(
                     field_name=field_name,
+                    dataset_dir=str(dataset_dir),
                     field_loader=field_meta["loader"],
-                    cmap_name=field_meta["cmap"],
                     comps_to_plot=comps_to_plot,
                     axes_to_slice=axes_to_slice,
+                    cmap_name=field_meta["cmap"],
                     fig_dir=str(fig_dir),
-                    dataset_dir=str(dataset_dir),
                     index_width=index_width,
                     verbose=False,
                 ),
@@ -402,12 +401,7 @@ def render_fields_in_parallel(
     )
 
 
-##
-## === ORCHESTRATOR
-##
-
-
-class PlotInterface:
+class ScriptInterface:
 
     def __init__(
         self,
@@ -504,7 +498,7 @@ class PlotInterface:
 
 def main():
     user_args = utils.get_user_args()
-    field_plotter = PlotInterface(
+    script_interface = ScriptInterface(
         input_dir=user_args.dir,
         fields_to_plot=user_args.fields,
         comps_to_plot=user_args.comps,
@@ -512,7 +506,7 @@ def main():
         animate_only=user_args.animate_only,
         use_parallel=True,
     )
-    field_plotter.run()
+    script_interface.run()
 
 
 ##

@@ -15,7 +15,7 @@ from ww_quokka_sims.sim_io import load_dataset
 import utils
 
 ##
-## === DATA TYPES
+## === DATA CLASSES
 ##
 
 
@@ -249,7 +249,7 @@ class RenderDataSeries:
         )
 
 
-class PlotInterface:
+class ScriptInterface:
 
     def __init__(
         self,
@@ -299,12 +299,12 @@ class PlotInterface:
 
 def main():
     args = utils.get_user_args()
-    plot_interface = PlotInterface(
+    script_interface = ScriptInterface(
         input_dir=args.dir,
         fields_to_plot=args.fields,
         use_parallel=True,
     )
-    plot_interface.run()
+    script_interface.run()
 
 
 ##

@@ -22,6 +22,10 @@ Axis = Literal["x", "y", "z"]
 
 LOOKUP_AXIS_INDEX: dict[Axis, int] = {"x": 0, "y": 1, "z": 2}
 
+##
+## === DATA CLASSES
+##
+
 
 @dataclass(frozen=True)
 class CompProfile:
@@ -46,6 +50,11 @@ class CompProfile:
             self.x_array_by_axis[axis_index],
             self.y_array_by_axis[axis_index],
         )
+
+
+##
+## === OPERATOR CLASSES
+##
 
 
 class ComputeCompProfiles:
@@ -338,7 +347,7 @@ class RenderCompProfiles:
         )
 
 
-class PlotInterface:
+class ScriptInterface:
 
     def __init__(
         self,
@@ -396,14 +405,14 @@ class PlotInterface:
 
 def main():
     args = utils.get_user_args()
-    plotter_interface = PlotInterface(
+    script_interface = ScriptInterface(
         input_dir=args.dir,
         fields_to_plot=args.fields,
         comps_to_plot=args.comps,
         axes_to_slice=args.axes,
         verbose=True,
     )
-    plotter_interface.run()
+    script_interface.run()
 
 
 ##
