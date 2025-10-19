@@ -213,8 +213,8 @@ class FieldPlotter:
     ) -> Dataset:
         with load_dataset.QuokkaDataset(dataset_dir=dataset_dir, verbose=verbose) as ds:
             uniform_domain = ds.load_uniform_domain()
-            loader_func = getattr(ds, self.field_args.field_loader)
-            field = loader_func()  # ScalarField or VectorField
+            loader_fn = getattr(ds, self.field_args.field_loader)
+            field = loader_fn()  # ScalarField or VectorField
         return Dataset(
             uniform_domain=uniform_domain,
             field=field,
@@ -393,7 +393,7 @@ def render_fields_in_parallel(
                 ),
             )
     parallel_utils.run_in_parallel(
-        worker_func=_plot_dataset_worker,
+        worker_fn=_plot_dataset_worker,
         grouped_worker_args=grouped_worker_args,
         timeout_seconds=120,
         show_progress=True,

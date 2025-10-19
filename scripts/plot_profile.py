@@ -196,8 +196,8 @@ class ComputeCompProfiles:
         for dataset_dir in self.dataset_dirs:
             with load_dataset.QuokkaDataset(dataset_dir=dataset_dir, verbose=False) as ds:
                 uniform_domain = ds.load_uniform_domain()
-                loader_func = getattr(ds, self.field_loader)
-                field = loader_func()  # ScalarField or VectorField
+                loader_fn = getattr(ds, self.field_loader)
+                field = loader_fn()  # ScalarField or VectorField
             if isinstance(field, field_types.ScalarField):
                 comp_profiles = self._compute_scalar_profiles(
                     field=field,

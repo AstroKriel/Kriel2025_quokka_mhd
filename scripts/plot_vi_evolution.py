@@ -92,8 +92,8 @@ class LoadDataSeries:
                 verbose=field_args.verbose,
         ) as ds:
             uniform_domain = ds.load_uniform_domain()
-            loader_func = getattr(ds, field_args.field_loader)
-            field = loader_func()  # should be ScalarField
+            loader_fn = getattr(ds, field_args.field_loader)
+            field = loader_fn()  # should be ScalarField
         field_types.ensure_sfield(sfield=field)
         assert field.sim_time is not None
         sim_time = float(field.sim_time)
@@ -121,7 +121,7 @@ class LoadDataSeries:
             return DataSeries(points=[])
         if self.use_parallel and (len(grouped_field_args) > 5):
             data_points: list[DataPoint] = parallel_utils.run_in_parallel(
-                worker_func=LoadDataSeries._load_snapshot,
+                worker_fn=LoadDataSeries._load_snapshot,
                 grouped_worker_args=grouped_field_args,
                 timeout_seconds=120,
                 show_progress=True,
@@ -196,12 +196,12 @@ class RenderDataSeries:
         if num_points < 3: return
         end_index = max(3, 3 * num_points // 4)
         ds = fit_data.DataSeries(
-            x_array=x_array[:end_index],
-            y_array=y_array[:end_index],
+            x_data_array=x_array[:end_index],
+            y_data_array=y_array[:end_index],
         )
         fit_summary = fit_data.fit_linear_model(ds)
-        slope_stat = fit_summary.get_parameter("slope")
-        intercept_stat = fit_summary.get_parameter("intercept")
+        slope_stat = fit_summary.get_param("slope")
+        intercept_stat = fit_summary.get_param("intercept")
         slope_value = slope_stat.value
         intercept_value = intercept_stat.value
         x0, x1 = float(x_array[0]), float(x_array[-1])

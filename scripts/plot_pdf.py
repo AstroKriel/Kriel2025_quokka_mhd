@@ -176,8 +176,8 @@ class ComputePDFs:
         field_pdfs: list[PDFData] = []
         for dataset_dir in self.dataset_dirs:
             with load_dataset.QuokkaDataset(dataset_dir=dataset_dir, verbose=False) as ds:
-                loader_func = getattr(ds, self.field_loader)
-                field = loader_func()
+                loader_fn = getattr(ds, self.field_loader)
+                field = loader_fn()
             if isinstance(field, field_types.ScalarField):
                 pdf = self._build_sfield_pdf(field=field)
             elif isinstance(field, field_types.VectorField):
