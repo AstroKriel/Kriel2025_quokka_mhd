@@ -12,7 +12,7 @@ from jormi.ww_plots import plot_manager
 ## === QUOKKA FIELD MAPPINGS
 ##
 
-QUOKKA_FIELDS_LOOKUP = {
+QUOKKA_FIELD_LOOKUP = {
     "rho": {
         "loader": "load_density_sfield",
         "cmap": "Greys",
@@ -47,6 +47,11 @@ QUOKKA_FIELDS_LOOKUP = {
         "loader": "load_sol_kinetic_energy_sfield",
         "cmap": "magma",
         "color": "cornflowerblue",
+    },
+    "Ekin_bulk": {
+        "loader": "load_bulk_kinetic_energy_sfield",
+        "cmap": "magma",
+        "color": "dodgerblue",
     },
     "Emag": {
         "loader": "load_magnetic_energy_sfield",
@@ -158,7 +163,7 @@ def resolve_dataset_dirs(
     return dataset_dirs
 
 
-def get_dataset_index(
+def get_dataset_index_str(
     dataset_dir: Path,
 ) -> str:
     dataset_name = dataset_dir.name
@@ -177,7 +182,7 @@ def get_max_index_width(
     if not dataset_dirs: return 1
     index_widths: list[int] = []
     for dataset_dir in dataset_dirs:
-        dataset_index_str = get_dataset_index(dataset_dir)
+        dataset_index_str = get_dataset_index_str(dataset_dir)
         index_widths.append(len(dataset_index_str))
     return max(index_widths) if index_widths else 1
 

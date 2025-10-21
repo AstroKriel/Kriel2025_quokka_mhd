@@ -126,7 +126,7 @@ class ComputePDFs:
         assert sim_time is not None
         return float(sim_time)
 
-    def _build_vfield_pdf(
+    def _compute_vfield_pdf(
         self,
         field: field_types.VectorField,
     ) -> PDFData:
@@ -153,7 +153,7 @@ class ComputePDFs:
             comp_labels=comp_labels,
         )
 
-    def _build_sfield_pdf(
+    def _compute_sfield_pdf(
         self,
         field: field_types.ScalarField,
     ) -> PDFData:
@@ -179,9 +179,9 @@ class ComputePDFs:
                 loader_fn = getattr(ds, self.field_loader)
                 field = loader_fn()
             if isinstance(field, field_types.ScalarField):
-                pdf = self._build_sfield_pdf(field=field)
+                pdf = self._compute_sfield_pdf(field=field)
             elif isinstance(field, field_types.VectorField):
-                pdf = self._build_vfield_pdf(field=field)
+                pdf = self._compute_vfield_pdf(field=field)
             else:
                 raise ValueError(f"{self.field_name} is an unrecognised field type.")
             field_pdfs.append(pdf)
@@ -316,7 +316,7 @@ class ScriptInterface:
         num_bins: int = 15,
         verbose: bool = True,
     ):
-        valid_fields = set(utils.QUOKKA_FIELDS_LOOKUP.keys())
+        valid_fields = set(utils.QUOKKA_FIELD_LOOKUP.keys())
         if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
             raise ValueError(f"Provide fields via -f from: {sorted(valid_fields)}")
         valid_axes: set[Axis] = {"x", "y", "z"}
@@ -338,7 +338,7 @@ class ScriptInterface:
             return
         fig_dir = dataset_dirs[0].parent
         for field_name in self.fields_to_plot:
-            field_meta = utils.QUOKKA_FIELDS_LOOKUP[field_name]
+            field_meta = utils.QUOKKA_FIELD_LOOKUP[field_name]
             renderer = RenderPDFs(
                 dataset_dirs=dataset_dirs,
                 fig_dir=fig_dir,

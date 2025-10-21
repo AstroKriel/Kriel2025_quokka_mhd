@@ -291,7 +291,7 @@ class FieldPlotter:
         verbose: bool,
     ) -> None:
         dataset = self._load_dataset(dataset_dir=dataset_dir, verbose=verbose)
-        dataset_index = int(utils.get_dataset_index(dataset_dir))
+        dataset_index = int(utils.get_dataset_index_str(dataset_dir))
         field_comps = self._get_field_comps(field=dataset.field)
         fig, axs_grid = utils.create_figure(
             num_rows=len(field_comps),
@@ -324,7 +324,7 @@ def render_fields_in_serial(
     index_width: int,
 ) -> None:
     for field_name in fields_to_plot:
-        field_meta = utils.QUOKKA_FIELDS_LOOKUP[field_name]
+        field_meta = utils.QUOKKA_FIELD_LOOKUP[field_name]
         field_args = FieldArgs(
             field_name=field_name,
             field_loader=field_meta["loader"],
@@ -377,7 +377,7 @@ def render_fields_in_parallel(
 ) -> None:
     grouped_worker_args: list[WorkerArgs] = []
     for field_name in fields_to_plot:
-        field_meta = utils.QUOKKA_FIELDS_LOOKUP[field_name]
+        field_meta = utils.QUOKKA_FIELD_LOOKUP[field_name]
         for dataset_dir in dataset_dirs:
             grouped_worker_args.append(
                 WorkerArgs(
@@ -413,7 +413,7 @@ class ScriptInterface:
         use_parallel: bool = True,
         animate_only: bool = False,
     ):
-        valid_fields = set(utils.QUOKKA_FIELDS_LOOKUP.keys())
+        valid_fields = set(utils.QUOKKA_FIELD_LOOKUP.keys())
         if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
             raise ValueError(f"Provide one or more field to plot (via -f) from: {sorted(valid_fields)}")
         valid_axes: set[Axis] = {"x", "y", "z"}

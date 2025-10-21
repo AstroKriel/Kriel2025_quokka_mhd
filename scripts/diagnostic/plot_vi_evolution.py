@@ -258,7 +258,7 @@ class ScriptInterface:
         fields_to_plot: list[str],
         use_parallel: bool = True,
     ):
-        valid_fields = set(utils.QUOKKA_FIELDS_LOOKUP.keys())
+        valid_fields = set(utils.QUOKKA_FIELD_LOOKUP.keys())
         if (not fields_to_plot) or (not set(fields_to_plot).issubset(valid_fields)):
             raise ValueError(f"Provide one or more fields to plot (via -f) from: {sorted(valid_fields)}")
         self.input_dir = Path(input_dir)
@@ -274,7 +274,7 @@ class ScriptInterface:
         fig_dir = Path(dataset_dirs[0]).parent
         dataset_dirs = sorted(dataset_dirs)
         for field_name in self.fields_to_plot:
-            field_meta = utils.QUOKKA_FIELDS_LOOKUP[field_name]
+            field_meta = utils.QUOKKA_FIELD_LOOKUP[field_name]
             load_data_series = LoadDataSeries(
                 dataset_dirs=dataset_dirs,
                 field_name=field_name,

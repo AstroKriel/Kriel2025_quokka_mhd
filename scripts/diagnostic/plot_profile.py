@@ -358,7 +358,7 @@ class ScriptInterface:
         axes_to_slice: tuple[Axis, ...] | list[Axis] | None,
         verbose: bool = True,
     ):
-        valid_fields = set(utils.QUOKKA_FIELDS_LOOKUP.keys())
+        valid_fields = set(utils.QUOKKA_FIELD_LOOKUP.keys())
         if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
             raise ValueError(f"Provide fields via -f from: {sorted(valid_fields)}")
         valid_axes: set[Axis] = {"x", "y", "z"}
@@ -384,7 +384,7 @@ class ScriptInterface:
             return
         fig_dir = dataset_dirs[0].parent
         for field_name in self.fields_to_plot:
-            field_meta = utils.QUOKKA_FIELDS_LOOKUP[field_name]
+            field_meta = utils.QUOKKA_FIELD_LOOKUP[field_name]
             render_comp_profiles = RenderCompProfiles(
                 dataset_dirs=dataset_dirs,
                 fig_dir=fig_dir,
