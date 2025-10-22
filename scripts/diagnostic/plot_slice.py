@@ -239,7 +239,7 @@ class FieldPlotter:
             return [
                 FieldComp(
                     data_3d=field.data[LOOKUP_AXIS_INDEX[comp_name]],
-                    label=rf"$({field_name})_{{{comp_name}}}$",
+                    label=rf"$(${field_name}$)_{{{comp_name}}}$",
                 ) for comp_name in sorted(self.comps_to_plot)
             ]
         raise ValueError(f"{field_name} is an unrecognised field type.")

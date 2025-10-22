@@ -163,7 +163,7 @@ class ComputeCompProfiles:
         axis_labels = list(self.axes_to_slice)
         comp_profiles: list[CompProfile] = []
         for comp_name in comp_names:
-            comp_label = rf"$({self.field_name})_{{{comp_name}}}$"
+            comp_label = rf"$(${self.field_name}$)_{{{comp_name}}}$"
             x_array_by_axis: list[numpy.ndarray] = []
             y_array_by_axis: list[numpy.ndarray] = []
             for axis_to_slice in axis_labels:
