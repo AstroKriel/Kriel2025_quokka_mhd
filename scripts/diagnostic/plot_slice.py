@@ -37,6 +37,7 @@ class FieldArgs:
 
 class WorkerArgs(NamedTuple):
     dataset_dir: str
+    dataset_tag: str
     field_name: str
     field_loader: str
     comps_to_plot: tuple[Axis, ...]
@@ -44,7 +45,6 @@ class WorkerArgs(NamedTuple):
     cmap_name: str
     fig_dir: str
     index_width: int
-    verbose: bool
 
 
 @dataclass(frozen=True)
@@ -53,7 +53,9 @@ class Dataset:
     field: field_types.ScalarField | field_types.VectorField
 
     @property
-    def sim_time(self) -> float:
+    def sim_time(
+        self,
+    ) -> float:
         sim_time = self.field.sim_time
         type_utils.ensure_finite_float(
             var_obj=sim_time,
@@ -148,6 +150,7 @@ def slice_field(
 
 @dataclass(frozen=True)
 class FieldPlotter:
+    dataset_tag: str
     field_args: FieldArgs
     comps_to_plot: tuple[Axis, ...]
     axes_to_slice: tuple[Axis, ...]
@@ -209,9 +212,8 @@ class FieldPlotter:
         self,
         *,
         dataset_dir: Path,
-        verbose: bool,
     ) -> Dataset:
-        with load_dataset.QuokkaDataset(dataset_dir=dataset_dir, verbose=verbose) as ds:
+        with load_dataset.QuokkaDataset(dataset_dir=dataset_dir, verbose=False) as ds:
             uniform_domain = ds.load_uniform_domain()
             loader_fn = getattr(ds, self.field_args.field_loader)
             field = loader_fn()  # ScalarField or VectorField
@@ -235,7 +237,7 @@ class FieldPlotter:
             ]
         if isinstance(field, field_types.VectorField):
             if not self.comps_to_plot:
-                raise ValueError(f"Vector field '{field_name}' requires at least one component via -c")
+                raise ValueError(f"Vector field '{field_name}' requires at least one component to plot; none provided.")
             return [
                 FieldComp(
                     data_3d=field.data[LOOKUP_AXIS_INDEX[comp_name]],
@@ -290,8 +292,13 @@ class FieldPlotter:
         index_width: int,
         verbose: bool,
     ) -> None:
-        dataset = self._load_dataset(dataset_dir=dataset_dir, verbose=verbose)
-        dataset_index = int(utils.get_dataset_index_str(dataset_dir))
+        dataset = self._load_dataset(dataset_dir=dataset_dir)
+        dataset_index = int(
+            utils.get_dataset_index_str(
+                dataset_dir=dataset_dir,
+                dataset_tag=self.dataset_tag,
+            ),
+        )
         field_comps = self._get_field_comps(field=dataset.field)
         fig, axs_grid = utils.create_figure(
             num_rows=len(field_comps),
@@ -316,6 +323,7 @@ class FieldPlotter:
 
 def render_fields_in_serial(
     *,
+    dataset_tag: str,
     fields_to_plot: tuple[str, ...],
     comps_to_plot: tuple[Axis, ...],
     axes_to_slice: tuple[Axis, ...],
@@ -331,6 +339,7 @@ def render_fields_in_serial(
             cmap_name=field_meta["cmap"],
         )
         field_plotter = FieldPlotter(
+            dataset_tag=dataset_tag,
             field_args=field_args,
             comps_to_plot=comps_to_plot,
             axes_to_slice=axes_to_slice,
@@ -340,20 +349,21 @@ def render_fields_in_serial(
                 fig_dir=fig_dir,
                 dataset_dir=dataset_dir,
                 index_width=index_width,
-                verbose=False,
+                verbose=True,
             )
 
 
 def _plot_dataset_worker(
-    *args,
+    *user_args,
 ) -> None:
-    worker_args = WorkerArgs(*args)
+    worker_args = WorkerArgs(*user_args)
     field_args = FieldArgs(
         field_name=worker_args.field_name,
         field_loader=worker_args.field_loader,
         cmap_name=worker_args.cmap_name,
     )
     field_plotter = FieldPlotter(
+        dataset_tag=worker_args.dataset_tag,
         field_args=field_args,
         comps_to_plot=worker_args.comps_to_plot,
         axes_to_slice=worker_args.axes_to_slice,
@@ -362,12 +372,13 @@ def _plot_dataset_worker(
         fig_dir=Path(worker_args.fig_dir),
         dataset_dir=Path(worker_args.dataset_dir),
         index_width=int(worker_args.index_width),
-        verbose=bool(worker_args.verbose),
+        verbose=False,
     )
 
 
 def render_fields_in_parallel(
     *,
+    dataset_tag: str,
     fields_to_plot: tuple[str, ...],
     comps_to_plot: tuple[Axis, ...],
     axes_to_slice: tuple[Axis, ...],
@@ -381,15 +392,15 @@ def render_fields_in_parallel(
         for dataset_dir in dataset_dirs:
             grouped_worker_args.append(
                 WorkerArgs(
-                    field_name=field_name,
                     dataset_dir=str(dataset_dir),
+                    dataset_tag=dataset_tag,
+                    field_name=field_name,
                     field_loader=field_meta["loader"],
                     comps_to_plot=comps_to_plot,
                     axes_to_slice=axes_to_slice,
                     cmap_name=field_meta["cmap"],
                     fig_dir=str(fig_dir),
                     index_width=index_width,
-                    verbose=False,
                 ),
             )
     parallel_utils.run_in_parallel(
@@ -407,12 +418,14 @@ class ScriptInterface:
         self,
         *,
         input_dir: Path,
+        dataset_tag: str,
         fields_to_plot: tuple[str, ...] | list[str] | None,
         comps_to_plot: tuple[Axis, ...] | list[Axis] | None,
         axes_to_slice: tuple[Axis, ...] | list[Axis] | None,
         use_parallel: bool = True,
         animate_only: bool = False,
     ):
+        type_utils.ensure_nonempty_str(var_obj=dataset_tag, var_name="dataset_tag")
         valid_fields = set(utils.QUOKKA_FIELD_LOOKUP.keys())
         if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
             raise ValueError(f"Provide one or more field to plot (via -f) from: {sorted(valid_fields)}")
@@ -426,6 +439,7 @@ class ScriptInterface:
         elif not set(axes_to_slice).issubset(valid_axes):
             raise ValueError("Provide one or more axes (via -a) from: x, y, z")
         self.input_dir = Path(input_dir)
+        self.dataset_tag = dataset_tag
         self.fields_to_plot = type_utils.as_tuple(seq_obj=fields_to_plot)
         self.comps_to_plot = type_utils.as_tuple(seq_obj=comps_to_plot)
         self.axes_to_slice = type_utils.as_tuple(seq_obj=axes_to_slice)
@@ -464,14 +478,21 @@ class ScriptInterface:
     def run(
         self,
     ) -> None:
-        dataset_dirs = utils.resolve_dataset_dirs(self.input_dir)
+        dataset_dirs = utils.resolve_dataset_dirs(
+            input_dir=self.input_dir,
+            dataset_tag=self.dataset_tag,
+        )
         if not dataset_dirs:
             return
         fig_dir = dataset_dirs[0].parent
-        index_width = utils.get_max_index_width(dataset_dirs)
+        index_width = utils.get_max_index_width(
+            dataset_dirs=dataset_dirs,
+            dataset_tag=self.dataset_tag,
+        )
         if not self.animate_only:
             if self.use_parallel and (len(dataset_dirs) > 5):
                 render_fields_in_parallel(
+                    dataset_tag=self.dataset_tag,
                     fields_to_plot=self.fields_to_plot,
                     comps_to_plot=self.comps_to_plot,
                     axes_to_slice=self.axes_to_slice,
@@ -481,6 +502,7 @@ class ScriptInterface:
                 )
             else:
                 render_fields_in_serial(
+                    dataset_tag=self.dataset_tag,
                     fields_to_plot=self.fields_to_plot,
                     comps_to_plot=self.comps_to_plot,
                     axes_to_slice=self.axes_to_slice,
@@ -500,6 +522,7 @@ def main():
     user_args = utils.get_user_args()
     script_interface = ScriptInterface(
         input_dir=user_args.dir,
+        dataset_tag=user_args.tag,
         fields_to_plot=user_args.fields,
         comps_to_plot=user_args.comps,
         axes_to_slice=user_args.axes,

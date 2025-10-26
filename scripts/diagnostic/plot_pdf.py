@@ -34,7 +34,9 @@ class PDFData:
     grouped_densities: list[numpy.ndarray]
     comp_labels: list[str]
 
-    def __post_init__(self) -> None:
+    def __post_init__(
+        self,
+    ) -> None:
         ## container validation
         type_utils.ensure_sequence(
             var_obj=self.grouped_bin_centers,
@@ -131,7 +133,7 @@ class ComputePDFs:
         field: field_types.VectorField,
     ) -> PDFData:
         if len(self.comps_to_plot) == 0:
-            raise ValueError(f"Vector field '{self.field_name}' requires at least one component via -c")
+            raise ValueError(f"Vector field '{self.field_name}' requires at least one component to plot; none provided.")
         field_types.ensure_vfield(field)
         sim_time = self._get_sim_time(field=field)
         comp_names = sorted(self.comps_to_plot)
@@ -201,7 +203,6 @@ class RenderPDFs:
         cmap_name: str,
         field_loader: str,
         num_bins: int,
-        verbose: bool = False,
     ):
         self.dataset_dirs = dataset_dirs
         self.fig_dir = Path(fig_dir)
@@ -210,7 +211,6 @@ class RenderPDFs:
         self.cmap_name = cmap_name
         self.field_loader = field_loader
         self.num_bins = int(num_bins)
-        self.verbose = bool(verbose)
 
     @staticmethod
     def _style_axs(
@@ -264,7 +264,9 @@ class RenderPDFs:
             ax_percentage=0.05,
         )
 
-    def run(self) -> None:
+    def run(
+        self,
+    ) -> None:
         compute_pdfs = ComputePDFs(
             dataset_dirs=self.dataset_dirs,
             field_name=self.field_name,
@@ -301,7 +303,7 @@ class RenderPDFs:
         plot_manager.save_figure(
             fig=fig,
             fig_path=fig_path,
-            verbose=self.verbose,
+            verbose=True,
         )
 
 
@@ -311,11 +313,12 @@ class ScriptInterface:
         self,
         *,
         input_dir: Path,
+        dataset_tag: str,
         fields_to_plot: tuple[str, ...] | list[str] | None,
         comps_to_plot: tuple[Axis, ...] | list[Axis] | None,
         num_bins: int = 15,
-        verbose: bool = True,
     ):
+        type_utils.ensure_nonempty_str(var_obj=dataset_tag, var_name="dataset_tag")
         valid_fields = set(utils.QUOKKA_FIELD_LOOKUP.keys())
         if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
             raise ValueError(f"Provide fields via -f from: {sorted(valid_fields)}")
@@ -325,15 +328,18 @@ class ScriptInterface:
         elif not set(comps_to_plot).issubset(valid_axes):
             raise ValueError("Provide one or more components (via -c) from: x, y, z")
         self.input_dir = Path(input_dir)
+        self.dataset_tag = dataset_tag
         self.fields_to_plot = type_utils.as_tuple(seq_obj=fields_to_plot)
         self.comps_to_plot = type_utils.as_tuple(seq_obj=comps_to_plot)
         self.num_bins = int(num_bins)
-        self.verbose = bool(verbose)
 
     def run(
         self,
     ) -> None:
-        dataset_dirs = utils.resolve_dataset_dirs(self.input_dir)
+        dataset_dirs = utils.resolve_dataset_dirs(
+            input_dir=self.input_dir,
+            dataset_tag=self.dataset_tag,
+        )
         if not dataset_dirs:
             return
         fig_dir = dataset_dirs[0].parent
@@ -347,7 +353,6 @@ class ScriptInterface:
                 cmap_name=field_meta["cmap"],
                 field_loader=field_meta["loader"],
                 num_bins=self.num_bins,
-                verbose=self.verbose,
             )
             renderer.run()
 
@@ -358,13 +363,13 @@ class ScriptInterface:
 
 
 def main():
-    args = utils.get_user_args()
+    user_args = utils.get_user_args()
     script_interface = ScriptInterface(
-        input_dir=args.dir,
-        fields_to_plot=args.fields,
-        comps_to_plot=args.comps,
+        input_dir=user_args.dir,
+        dataset_tag=user_args.tag,
+        fields_to_plot=user_args.fields,
+        comps_to_plot=user_args.comps,
         num_bins=15,
-        verbose=True,
     )
     script_interface.run()
 

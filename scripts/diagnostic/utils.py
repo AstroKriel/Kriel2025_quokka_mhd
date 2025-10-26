@@ -6,6 +6,7 @@
 
 import argparse
 from pathlib import Path
+from jormi.utils import type_utils
 from jormi.ww_plots import plot_manager
 
 ##
@@ -90,22 +91,29 @@ def get_user_args():
         help="Optional path to a Quokka simulation or dataset directory.",
     )
     parser.add_argument(
-        "--comps",
-        "-c",
-        nargs="+",
-        default=None,
-        help="Optional list of components to plot.",
-    )
-    parser.add_argument(
-        "--axes",
-        "-a",
-        nargs="+",
-        default=None,
-        help="Optional list of axes to plot.",
+        "--tag",
+        "-t",
+        default="plt",
+        help=
+        "Dataset tag used to identify output directories (e.g., 'plt' -> plt00010, plt00020). Default: 'plt'.",
     )
     parser.add_argument(
         "--fields",
         "-f",
+        nargs="+",
+        default=None,
+        help="Optional list of (vector and/or scalar) fields to plot.",
+    )
+    parser.add_argument(
+        "--comps",
+        "-c",
+        nargs="+",
+        default=None,
+        help="Optional list of vector field components to plot.",
+    )
+    parser.add_argument(
+        "--axes",
+        "-a",
         nargs="+",
         default=None,
         help="Optional list of axes to plot.",
@@ -122,8 +130,8 @@ def get_user_args():
         default=False,
         help="Fit to some data (default: False).",
     )
-    args = parser.parse_args()
-    return args
+    user_args = parser.parse_args()
+    return user_args
 
 
 def create_figure(
@@ -141,50 +149,75 @@ def create_figure(
     return fig, axs_grid
 
 
+def _looks_like_amrex_plotfile(
+    dataset_dir: Path,
+) -> bool:
+    type_utils.ensure_type(var_obj=dataset_dir, valid_types=Path)
+    if not dataset_dir.exists() or not dataset_dir.is_dir():
+        return False
+    has_header = (dataset_dir / "Header").is_file()
+    has_level0 = (dataset_dir / "Level_0").is_dir()
+    return has_header and has_level0
+
+
 def get_latest_dataset_dirs(
     sim_dir: Path,
+    dataset_tag: str,
 ) -> list[Path]:
     dataset_dirs = [
         sub_dir for sub_dir in sim_dir.iterdir()
-        if sub_dir.is_dir() and ("plt" in sub_dir.name) and ("old" not in sub_dir.name)
+        if sub_dir.is_dir() and (dataset_tag in sub_dir.name) and ("old" not in sub_dir.name)
     ]
-    dataset_dirs.sort(key=lambda dataset_dir: int(dataset_dir.name.split("plt")[1]))  # sort by plt-index
+    dataset_dirs.sort(
+        key=lambda dataset_dir: int(get_dataset_index_str(dataset_dir, dataset_tag)),
+    )  # sort by index
     return dataset_dirs
 
 
 def resolve_dataset_dirs(
     input_dir: Path,
+    dataset_tag: str,
 ) -> list[Path]:
-    if "plt" in input_dir.name:
-        dataset_dirs = [input_dir]
-        return dataset_dirs
-    dataset_dirs = get_latest_dataset_dirs(sim_dir=input_dir)
-    assert len(dataset_dirs) != 0
+    if (dataset_tag in input_dir.name) or _looks_like_amrex_plotfile(input_dir):
+        return [input_dir]
+    dataset_dirs = get_latest_dataset_dirs(
+        sim_dir=input_dir,
+        dataset_tag=dataset_tag,
+    )
+    if not dataset_dirs:
+        raise ValueError(f"No dataset directories found using tag '{dataset_tag}' under: {input_dir}")
     return dataset_dirs
 
 
 def get_dataset_index_str(
     dataset_dir: Path,
+    dataset_tag: str,
 ) -> str:
     dataset_name = dataset_dir.name
-    name_parts = dataset_name.split("plt")
+    if dataset_tag not in dataset_name:
+        raise ValueError(f"Dataset tag '{dataset_tag}' was not found in '{dataset_name}'.")
+    name_parts = dataset_name.split(dataset_tag)
     if len(name_parts) < 2:
         raise ValueError(f"Unexpected dataset name format: {dataset_name}")
     digits_str = name_parts[1].split(".")[0]
     if not digits_str.isdigit():
-        raise ValueError(f"Expected digits after 'plt' in {dataset_name}")
+        raise ValueError(f"Expected digits after '{dataset_tag}' in {dataset_name}")
     return digits_str
 
 
 def get_max_index_width(
     dataset_dirs: list[Path],
+    dataset_tag: str,
 ) -> int:
     if not dataset_dirs: return 1
     index_widths: list[int] = []
     for dataset_dir in dataset_dirs:
-        dataset_index_str = get_dataset_index_str(dataset_dir)
+        dataset_index_str = get_dataset_index_str(
+            dataset_dir=dataset_dir,
+            dataset_tag=dataset_tag,
+        )
         index_widths.append(len(dataset_index_str))
-    return max(index_widths) if index_widths else 1
+    return max(index_widths) if len(index_widths) > 0 else 1
 
 
 ## } MODULE

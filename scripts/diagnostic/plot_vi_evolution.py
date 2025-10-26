@@ -7,7 +7,7 @@
 import numpy
 from pathlib import Path
 from dataclasses import dataclass
-from jormi.utils import parallel_utils, array_utils
+from jormi.utils import parallel_utils, type_utils, array_utils
 from jormi.ww_data import fit_data
 from jormi.ww_plots import plot_manager, annotate_axis
 from jormi.ww_fields import field_types, field_operators
@@ -24,7 +24,6 @@ class FieldArgs:
     dataset_dir: Path
     field_name: str
     field_loader: str
-    verbose: bool
 
 
 @dataclass(frozen=True)
@@ -73,13 +72,11 @@ class LoadDataSeries:
         dataset_dirs: list[Path],
         field_name: str,
         field_loader: str,
-        verbose: bool = False,
         use_parallel: bool = True,
     ):
         self.dataset_dirs = list(sorted(dataset_dirs))
         self.field_name = field_name
         self.field_loader = field_loader
-        self.verbose = bool(verbose)
         self.use_parallel = bool(use_parallel)
 
     @staticmethod
@@ -87,10 +84,7 @@ class LoadDataSeries:
         *,
         field_args: FieldArgs,
     ) -> DataPoint:
-        with load_dataset.QuokkaDataset(
-                dataset_dir=field_args.dataset_dir,
-                verbose=field_args.verbose,
-        ) as ds:
+        with load_dataset.QuokkaDataset(dataset_dir=field_args.dataset_dir, verbose=False) as ds:
             uniform_domain = ds.load_uniform_domain()
             loader_fn = getattr(ds, field_args.field_loader)
             field = loader_fn()  # should be ScalarField
@@ -114,7 +108,6 @@ class LoadDataSeries:
                 dataset_dir=Path(dataset_dir),
                 field_name=self.field_name,
                 field_loader=self.field_loader,
-                verbose=False,
             ) for dataset_dir in self.dataset_dirs
         ]
         if not grouped_field_args:
@@ -142,12 +135,10 @@ class RenderDataSeries:
         fig_dir: Path,
         field_name: str,
         color: str,
-        verbose: bool = False,
     ):
         self.fig_dir = Path(fig_dir)
         self.field_name = field_name
         self.color = color
-        self.verbose = bool(verbose)
 
     @staticmethod
     def _annotate_fit(
@@ -164,7 +155,9 @@ class RenderDataSeries:
         with_box: bool = True,
     ) -> None:
 
-        def _fmt(stat) -> str:
+        def _fmt(
+            stat,
+        ) -> str:
             return f"{stat.value:.3e}" + (
                 f" +/- {stat.sigma:.1e}" if getattr(stat, "sigma", None) is not None else ""
             )
@@ -245,7 +238,7 @@ class RenderDataSeries:
         plot_manager.save_figure(
             fig=fig,
             fig_path=fig_path,
-            verbose=self.verbose,
+            verbose=True,
         )
 
 
@@ -255,20 +248,26 @@ class ScriptInterface:
         self,
         *,
         input_dir: Path,
+        dataset_tag: str,
         fields_to_plot: list[str],
         use_parallel: bool = True,
     ):
+        type_utils.ensure_nonempty_str(var_obj=dataset_tag, var_name="dataset_tag")
         valid_fields = set(utils.QUOKKA_FIELD_LOOKUP.keys())
         if (not fields_to_plot) or (not set(fields_to_plot).issubset(valid_fields)):
             raise ValueError(f"Provide one or more fields to plot (via -f) from: {sorted(valid_fields)}")
         self.input_dir = Path(input_dir)
+        self.dataset_tag = dataset_tag
         self.fields_to_plot = fields_to_plot
         self.use_parallel = bool(use_parallel)
 
     def run(
         self,
     ) -> None:
-        dataset_dirs = utils.resolve_dataset_dirs(self.input_dir)
+        dataset_dirs = utils.resolve_dataset_dirs(
+            input_dir=self.input_dir,
+            dataset_tag=self.dataset_tag,
+        )
         if not dataset_dirs:
             return
         fig_dir = Path(dataset_dirs[0]).parent
@@ -280,14 +279,12 @@ class ScriptInterface:
                 field_name=field_name,
                 field_loader=field_meta["loader"],
                 use_parallel=self.use_parallel,
-                verbose=False,
             )
             data_series = load_data_series.run()
             render_data_series = RenderDataSeries(
                 fig_dir=fig_dir,
                 field_name=field_name,
                 color=field_meta["color"],
-                verbose=True,
             )
             render_data_series.run(data_series=data_series)
 
@@ -298,10 +295,11 @@ class ScriptInterface:
 
 
 def main():
-    args = utils.get_user_args()
+    user_args = utils.get_user_args()
     script_interface = ScriptInterface(
-        input_dir=args.dir,
-        fields_to_plot=args.fields,
+        input_dir=user_args.dir,
+        dataset_tag=user_args.tag,
+        fields_to_plot=user_args.fields,
         use_parallel=True,
     )
     script_interface.run()

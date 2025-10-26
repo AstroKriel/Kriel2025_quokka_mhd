@@ -156,7 +156,7 @@ class ComputeCompProfiles:
         uniform_domain: field_types.UniformDomain,
     ) -> list[CompProfile]:
         if len(self.comps_to_plot) == 0:
-            raise ValueError(f"Vector field '{self.field_name}' requires at least one component via -c")
+            raise ValueError(f"Vector field '{self.field_name}' requires at least one component to plot; none provided.")
         field_types.ensure_vfield(field)
         sim_time = self._get_sim_time(field=field)
         comp_names = sorted(self.comps_to_plot)
@@ -232,7 +232,6 @@ class RenderCompProfiles:
         field_loader: str,
         cmap_name: str,
         fig_dir: Path,
-        verbose: bool = False,
     ):
         self.dataset_dirs = dataset_dirs
         self.fig_dir = Path(fig_dir)
@@ -241,7 +240,6 @@ class RenderCompProfiles:
         self.axes_to_slice = axes_to_slice
         self.field_loader = field_loader
         self.cmap_name = cmap_name
-        self.verbose = bool(verbose)
 
     @staticmethod
     def _style_axs(
@@ -343,7 +341,7 @@ class RenderCompProfiles:
         plot_manager.save_figure(
             fig=fig,
             fig_path=fig_path,
-            verbose=self.verbose,
+            verbose=True,
         )
 
 
@@ -353,11 +351,12 @@ class ScriptInterface:
         self,
         *,
         input_dir: Path,
+        dataset_tag: str,
         fields_to_plot: list[str],
         comps_to_plot: tuple[Axis, ...] | list[Axis] | None,
         axes_to_slice: tuple[Axis, ...] | list[Axis] | None,
-        verbose: bool = True,
     ):
+        type_utils.ensure_nonempty_str(var_obj=dataset_tag, var_name="dataset_tag")
         valid_fields = set(utils.QUOKKA_FIELD_LOOKUP.keys())
         if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
             raise ValueError(f"Provide fields via -f from: {sorted(valid_fields)}")
@@ -371,15 +370,18 @@ class ScriptInterface:
         elif not set(axes_to_slice).issubset(valid_axes):
             raise ValueError("Provide one or more axes (via -a) from: x, y, z")
         self.input_dir = Path(input_dir)
+        self.dataset_tag = dataset_tag
         self.fields_to_plot = type_utils.as_tuple(seq_obj=fields_to_plot)
         self.comps_to_plot = type_utils.as_tuple(seq_obj=comps_to_plot)
         self.axes_to_slice = type_utils.as_tuple(seq_obj=axes_to_slice)
-        self.verbose = bool(verbose)
 
     def run(
         self,
     ) -> None:
-        dataset_dirs = utils.resolve_dataset_dirs(self.input_dir)
+        dataset_dirs = utils.resolve_dataset_dirs(
+            input_dir=self.input_dir,
+            dataset_tag=self.dataset_tag,
+        )
         if not dataset_dirs:
             return
         fig_dir = dataset_dirs[0].parent
@@ -393,7 +395,6 @@ class ScriptInterface:
                 axes_to_slice=self.axes_to_slice,
                 field_loader=field_meta["loader"],
                 cmap_name=field_meta["cmap"],
-                verbose=self.verbose,
             )
             render_comp_profiles.run()
 
@@ -404,13 +405,13 @@ class ScriptInterface:
 
 
 def main():
-    args = utils.get_user_args()
+    user_args = utils.get_user_args()
     script_interface = ScriptInterface(
-        input_dir=args.dir,
-        fields_to_plot=args.fields,
-        comps_to_plot=args.comps,
-        axes_to_slice=args.axes,
-        verbose=True,
+        input_dir=user_args.dir,
+        dataset_tag=user_args.tag,
+        fields_to_plot=user_args.fields,
+        comps_to_plot=user_args.comps,
+        axes_to_slice=user_args.axes,
     )
     script_interface.run()
 
