@@ -234,7 +234,7 @@ class CompareDatasets:
                     "IN-shape": field_comparison.shape_in,
                     "REF-shape": field_comparison.shape_ref,
                 },
-                message_position="top",
+                message_position="bottom",
             )
             return
         if field_comparison.num_diffs == 0:
@@ -243,13 +243,14 @@ class CompareDatasets:
         diff_label = "diff-indices"
         if field_comparison.num_diffs > self.preview_limit:
             diff_label += f" (preview {self.preview_limit}/{field_comparison.num_diffs})"
+        num_cells = int(numpy.prod(field_comparison.shape_in))
         log_manager.log_warning(
-            text=f"[{field_key}] There are {field_comparison.num_diffs} cells that are different.",
+            text=f"[{field_key}] There are {field_comparison.num_diffs}/{num_cells} cells that are different.",
             notes={
-                "shape": field_comparison.shape_in,
                 diff_label: field_comparison.diff_indices_preview,
+                "shape": field_comparison.shape_in,
             },
-            message_position="top",
+            message_position="bottom",
         )
 
     def run(
