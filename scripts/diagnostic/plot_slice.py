@@ -226,7 +226,7 @@ class FieldPlotter:
         if isinstance(field, field_types.VectorField):
             if not self.comps_to_plot:
                 raise ValueError(
-                    f"Vector field `{field_name}` requires at least one component to plot; none provided."
+                    f"Vector field `{field_name}` requires at least one component to plot; none provided.",
                 )
             return [
                 FieldComp(

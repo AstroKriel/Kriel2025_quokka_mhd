@@ -7,10 +7,11 @@
 import argparse
 from pathlib import Path
 from jormi.utils import type_utils
+from jormi.ww_io import log_manager
 from jormi.ww_plots import plot_manager
 
 ##
-## === QUOKKA FIELD MAPPINGS
+## === QUOKKA FIELDS
 ##
 
 QUOKKA_FIELD_LOOKUP = {
@@ -82,7 +83,9 @@ QUOKKA_FIELD_LOOKUP = {
 
 
 def get_user_args():
-    parser = argparse.ArgumentParser(description="Diagnostic plots to make of quantities in a Quokka (BoxLib) data-directory.")
+    parser = argparse.ArgumentParser(
+        description="Diagnostic plots to make of quantities in a Quokka (BoxLib) data-directory.",
+    )
     parser.add_argument(
         "--dir",
         "-d",
@@ -158,6 +161,20 @@ def looks_like_boxlib_dir(
     has_header = (dataset_dir / "Header").is_file()
     has_level0 = (dataset_dir / "Level_0").is_dir()
     return has_header and has_level0
+
+
+def ensure_looks_like_boxlib_dir(
+    dataset_dir: Path,
+) -> None:
+    if not looks_like_boxlib_dir(dataset_dir=dataset_dir):
+        log_manager.log_error(
+            "Provided dataset does not appear to be a valid BoxLib-like plotfile.",
+            notes={
+                "Path": str(dataset_dir),
+                "Expected": "both a `Header` file and `Level_0` directory",
+            },
+        )
+        raise ValueError(f"Directory is not valid: {dataset_dir}")
 
 
 def get_latest_dataset_dirs(

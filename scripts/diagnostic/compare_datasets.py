@@ -5,7 +5,7 @@
 import numpy
 import argparse
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from jormi.utils import type_utils
 from jormi.ww_io import log_manager
 from ww_quokka_sims.sim_io import load_dataset
@@ -18,7 +18,7 @@ import utils
 
 def get_user_args():
     parser = argparse.ArgumentParser(
-        description="Compare two Quokka (BoxLib) data-directories.",
+        description="Compare two Quokka (BoxLib) data-directories (IN vs REF).",
     )
     parser.add_argument(
         "--dir-in",
@@ -57,7 +57,6 @@ class DatasetView:
         dataset_dir: Path,
     ):
         self.dataset_dir = Path(dataset_dir).expanduser().resolve()
-        assert utils.looks_like_boxlib_dir(dataset_dir=self.dataset_dir)
 
     def get_field_keys(
         self,
@@ -85,7 +84,7 @@ class FieldComparison:
     same_shape: bool
     shape_in: tuple[int, ...]
     shape_ref: tuple[int, ...]
-    diff_indices_preview: list[tuple[int, int, int]] = []
+    diff_indices_preview: list[tuple[int, int, int]] = field(default_factory=list)
     num_diffs: int = 0
 
 
@@ -174,29 +173,29 @@ class CompareDatasets:
         if len(keys_missing_from_in) > 0:
             log_manager.log_items(
                 title="Fields from dir-REF missing from dir-IN",
-                items=[str(k) for k in keys_missing_from_in],
-                message=f"There are {len(keys_missing_from_in)} fields not found in dir-IN",
-                message_position="top",
+                items=[str(field_key) for field_key in keys_missing_from_in],
+                message=f"There are {len(keys_missing_from_in)} fields not found in dir-IN.",
+                message_position="bottom",
             )
         if len(keys_missing_from_ref) > 0:
             log_manager.log_items(
                 title="Fields from dir-IN missing from dir-REF",
-                items=[str(k) for k in keys_missing_from_ref],
-                message=f"There are {len(keys_missing_from_ref)} fields not found in dir-REF",
-                message_position="top",
+                items=[str(field_key) for field_key in keys_missing_from_ref],
+                message=f"There are {len(keys_missing_from_ref)} fields not found in dir-REF.",
+                message_position="bottom",
             )
         if len(shared_keys) == 0:
             log_manager.log_items(
                 title="Available fields in dir-IN",
-                items=[str(k) for k in sorted(field_keys_in)],
-                message=f"There are {len(field_keys_in)} available fields",
-                message_position="top",
+                items=[str(field_key) for field_key in sorted(field_keys_in)],
+                message=f"There are {len(field_keys_in)} available fields.",
+                message_position="bottom",
             )
             log_manager.log_items(
                 title="Available fields in dir-REF",
-                items=[str(k) for k in sorted(field_keys_ref)],
-                message=f"There are {len(field_keys_ref)} available fields",
-                message_position="top",
+                items=[str(field_key) for field_key in sorted(field_keys_ref)],
+                message=f"There are {len(field_keys_ref)} available fields.",
+                message_position="bottom",
             )
             log_manager.log_error(
                 text="There are no shared fields to compare.",
@@ -232,8 +231,8 @@ class CompareDatasets:
             log_manager.log_error(
                 text=f"[{field_key}] Shape mismatch (IN vs REF).",
                 notes={
-                    "shape(IN)": field_comparison.shape_in,
-                    "shape(REF)": field_comparison.shape_ref,
+                    "IN-shape": field_comparison.shape_in,
+                    "REF-shape": field_comparison.shape_ref,
                 },
                 message_position="top",
             )
@@ -241,11 +240,14 @@ class CompareDatasets:
         if field_comparison.num_diffs == 0:
             log_manager.log_note(f"[{field_key}] IN == REF (identical).")
             return
+        diff_label = "diff-indices"
+        if field_comparison.num_diffs > self.preview_limit:
+            diff_label += f" (preview {self.preview_limit}/{field_comparison.num_diffs})"
         log_manager.log_warning(
             text=f"[{field_key}] There are {field_comparison.num_diffs} cells that are different.",
             notes={
                 "shape": field_comparison.shape_in,
-                "indices (preview)": field_comparison.diff_indices_preview,
+                diff_label: field_comparison.diff_indices_preview,
             },
             message_position="top",
         )
@@ -282,16 +284,8 @@ class ScriptInterface:
     ) -> None:
         type_utils.ensure_finite_int(var_obj=self.preview_limit)
         assert self.preview_limit > 0
-        for dataset_dir in [self.dataset_dir_in, self.dataset_dir_ref]:
-            if not utils.looks_like_boxlib_dir(dataset_dir=dataset_dir):
-                log_manager.log_error(
-                    "Provided dataset does not appear to be a valid BoxLib-like plotfile.",
-                    notes={
-                        "Path": str(dataset_dir),
-                        "Expected": "both a `Header` file and `Level_0` directory",
-                    },
-                )
-                raise SystemExit(2)
+        utils.ensure_looks_like_boxlib_dir(dataset_dir=self.dataset_dir_in)
+        utils.ensure_looks_like_boxlib_dir(dataset_dir=self.dataset_dir_ref)
 
     def run(
         self,

@@ -148,7 +148,7 @@ class ComputeCompProfiles:
     ) -> list[CompProfile]:
         if len(self.comps_to_plot) == 0:
             raise ValueError(
-                f"Vector field `{self.field_name}` requires at least one component to plot; none provided."
+                f"Vector field `{self.field_name}` requires at least one component to plot; none provided.",
             )
         field_types.ensure_vfield(field)
         sim_time = self._get_sim_time(field=field)

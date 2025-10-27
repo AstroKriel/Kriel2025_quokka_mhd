@@ -24,15 +24,14 @@ class ScriptInterface:
     ):
         self.dataset_dir = Path(dataset_dir).expanduser().resolve()
         self.dataset_tag = dataset_tag
-        if not utils.looks_like_boxlib_dir(dataset_dir=self.dataset_dir):
-            log_manager.log_error(
-                text="Provided dataset does not appear to be a valid BoxLib-like plotfile.",
-                notes={
-                    "Path": self.dataset_dir,
-                    "Expected": "both a `Header` file and `Level_0` directory",
-                },
-            )
-            raise SystemExit(2)
+        self._validate_inputs()
+
+    def _validate_inputs(
+        self,
+    ) -> None:
+        utils.ensure_looks_like_boxlib_dir(
+            dataset_dir=self.dataset_dir,
+        )
 
     def run(
         self,
@@ -51,6 +50,7 @@ def main():
     script_interface = ScriptInterface(
         dataset_dir=user_args.dir,
         dataset_tag=user_args.tag,
+        ## TODO: add field to check diagnostics for
     )
     script_interface.run()
 
