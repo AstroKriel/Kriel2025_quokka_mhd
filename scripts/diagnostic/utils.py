@@ -77,12 +77,12 @@ QUOKKA_FIELD_LOOKUP = {
 }
 
 ##
-## === FUNCTIONS
+## === HELPER FUNCTIONS
 ##
 
 
 def get_user_args():
-    parser = argparse.ArgumentParser(description="Test Quokka simulation(s).")
+    parser = argparse.ArgumentParser(description="Diagnostic plots to make of quantities in a Quokka (BoxLib) data-directory.")
     parser.add_argument(
         "--dir",
         "-d",
@@ -95,7 +95,7 @@ def get_user_args():
         "-t",
         default="plt",
         help=
-        "Dataset tag used to identify output directories (e.g., 'plt' -> plt00010, plt00020). Default: 'plt'.",
+        "Dataset tag used to identify output directories (e.g., `plt` -> plt00010, plt00020). Default: `plt`.",
     )
     parser.add_argument(
         "--fields",
@@ -109,26 +109,26 @@ def get_user_args():
         "-c",
         nargs="+",
         default=None,
-        help="Optional list of vector field components to plot.",
+        help="Optional list of vector field components to show.",
     )
     parser.add_argument(
         "--axes",
         "-a",
         nargs="+",
         default=None,
-        help="Optional list of axes to plot.",
+        help="Optional list of axes to slice.",
     )
     parser.add_argument(
         "--animate-only",
         action="store_true",
         default=False,
-        help="Skip to animation if provided (default: False).",
+        help="Skip straight to animation (default: False).",
     )
     parser.add_argument(
         "--fit",
         action="store_true",
         default=False,
-        help="Fit to some data (default: False).",
+        help="Perform the relevant fitting routine (default: False).",
     )
     user_args = parser.parse_args()
     return user_args
@@ -149,7 +149,7 @@ def create_figure(
     return fig, axs_grid
 
 
-def _looks_like_amrex_plotfile(
+def looks_like_boxlib_dir(
     dataset_dir: Path,
 ) -> bool:
     type_utils.ensure_type(var_obj=dataset_dir, valid_types=Path)
@@ -178,14 +178,14 @@ def resolve_dataset_dirs(
     input_dir: Path,
     dataset_tag: str,
 ) -> list[Path]:
-    if (dataset_tag in input_dir.name) or _looks_like_amrex_plotfile(input_dir):
+    if (dataset_tag in input_dir.name) or looks_like_boxlib_dir(input_dir):
         return [input_dir]
     dataset_dirs = get_latest_dataset_dirs(
         sim_dir=input_dir,
         dataset_tag=dataset_tag,
     )
     if not dataset_dirs:
-        raise ValueError(f"No dataset directories found using tag '{dataset_tag}' under: {input_dir}")
+        raise ValueError(f"No dataset directories found using tag `{dataset_tag}` under: {input_dir}")
     return dataset_dirs
 
 
@@ -195,13 +195,13 @@ def get_dataset_index_str(
 ) -> str:
     dataset_name = dataset_dir.name
     if dataset_tag not in dataset_name:
-        raise ValueError(f"Dataset tag '{dataset_tag}' was not found in '{dataset_name}'.")
+        raise ValueError(f"Dataset tag `{dataset_tag}` was not found in `{dataset_name}`.")
     name_parts = dataset_name.split(dataset_tag)
     if len(name_parts) < 2:
         raise ValueError(f"Unexpected dataset name format: {dataset_name}")
     digits_str = name_parts[1].split(".")[0]
     if not digits_str.isdigit():
-        raise ValueError(f"Expected digits after '{dataset_tag}' in {dataset_name}")
+        raise ValueError(f"Expected digits after `{dataset_tag}` in {dataset_name}")
     return digits_str
 
 
