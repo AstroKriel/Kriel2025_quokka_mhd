@@ -68,8 +68,6 @@ class FieldComp:
 class SlicedField:
     data_2d: numpy.ndarray
     label: str
-    min_value: float
-    max_value: float
     axis_bounds: tuple[float, float, float, float]
 
 
@@ -124,13 +122,9 @@ def slice_field(
         uniform_domain=uniform_domain,
         axis_to_slice=axis_to_slice,
     )
-    min_value = float(numpy.min(data_2d))
-    max_value = float(numpy.max(data_2d))
     return SlicedField(
         data_2d=data_2d,
         label=label,
-        min_value=min_value,
-        max_value=max_value,
         axis_bounds=axis_bounds,
     )
 
@@ -156,6 +150,8 @@ class FieldPlotter:
         label: str,
         cmap_name: str,
     ) -> None:
+        min_value = float(numpy.min(field_slice.data_2d))
+        max_value = float(numpy.max(field_slice.data_2d))
         plot_data.plot_sfield_slice(
             ax=ax,
             field_slice=field_slice.data_2d,
@@ -164,7 +160,7 @@ class FieldPlotter:
             add_colorbar=True,
             cbar_label=label,
             cbar_side="right",
-            cbar_bounds=(field_slice.min_value, field_slice.max_value),
+            cbar_bounds=(min_value, max_value),
         )
         annotate_axis.add_text(
             ax=ax,
@@ -172,7 +168,7 @@ class FieldPlotter:
             y_pos=0.95,
             x_alignment="center",
             y_alignment="top",
-            label=f"({field_slice.min_value:.2e}, {field_slice.max_value:.2e})",
+            label=f"min-value = {min_value:.2e}\nmax-value = {max_value:.2e}",
             fontsize=16,
             box_alpha=0.5,
             add_box=True,
@@ -229,7 +225,9 @@ class FieldPlotter:
             ]
         if isinstance(field, field_types.VectorField):
             if not self.comps_to_plot:
-                raise ValueError(f"Vector field '{field_name}' requires at least one component to plot; none provided.")
+                raise ValueError(
+                    f"Vector field `{field_name}` requires at least one component to plot; none provided."
+                )
             return [
                 FieldComp(
                     data_3d=field.data[field_types.DEFAULT_COMP_AXIS_TO_INDEX[comp_name]],
@@ -452,7 +450,7 @@ class ScriptInterface:
             if len(fig_paths) < 3:
                 log_manager.log_hint(
                     text=(
-                        f"Skipping animation for '{field_name}': "
+                        f"Skipping animation for `{field_name}`: "
                         f"only found {len(fig_paths)} frame(s), but need at least 3."
                     ),
                 )

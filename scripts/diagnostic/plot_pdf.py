@@ -69,7 +69,7 @@ class PDFData:
         self,
         comp_index: int = 0,
     ) -> tuple[numpy.ndarray, numpy.ndarray]:
-        if comp_index < 0 or comp_index >= self.num_comps:
+        if (comp_index < 0) or (comp_index >= self.num_comps):
             raise IndexError(f"comp_index {comp_index} out of range [0, {self.num_comps - 1}]")
         return self.grouped_bin_centers[comp_index], self.grouped_densities[comp_index]
 
@@ -104,7 +104,10 @@ class ComputePDFs:
     ) -> tuple[numpy.ndarray, numpy.ndarray]:
         pdf = compute_stats.estimate_pdf(values=field_data.ravel(), num_bins=num_bins)
         log10_densities = numpy.ma.log10(numpy.ma.masked_less_equal(pdf.densities, 0.0))
-        return pdf.bin_centers, log10_densities
+        return (
+            pdf.bin_centers,
+            log10_densities,
+        )
 
     @staticmethod
     def _get_sim_time(
@@ -125,7 +128,9 @@ class ComputePDFs:
         field: field_types.VectorField,
     ) -> PDFData:
         if len(self.comps_to_plot) == 0:
-            raise ValueError(f"Vector field '{self.field_name}' requires at least one component to plot; none provided.")
+            raise ValueError(
+                f"Vector field `{self.field_name}` requires at least one component to plot; none provided."
+            )
         field_types.ensure_vfield(field)
         sim_time = self._get_sim_time(field=field)
         comp_names = sorted(self.comps_to_plot)
@@ -246,7 +251,11 @@ class RenderPDFs:
         )
         for series_index, pdf_data in enumerate(field_pdfs):
             color = cmap(norm(series_index))
-            RenderPDFs._plot_snapshot(axs_grid=axs_grid, pdf_data=pdf_data, color=color)
+            RenderPDFs._plot_snapshot(
+                axs_grid=axs_grid,
+                pdf_data=pdf_data,
+                color=color,
+            )
         add_color.add_cbar_from_cmap(
             ax=axs_grid[-1][-1],
             label=r"snapshot index",
