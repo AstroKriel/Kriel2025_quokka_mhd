@@ -5,7 +5,7 @@
 ##
 
 import numpy
-from typing import Literal, NamedTuple
+from typing import NamedTuple
 from pathlib import Path
 from dataclasses import dataclass
 from jormi.ww_io import io_manager, log_manager
@@ -14,14 +14,6 @@ from jormi.ww_plots import plot_manager, plot_data, annotate_axis
 from jormi.ww_fields import field_types
 from ww_quokka_sims.sim_io import load_dataset
 import utils
-
-##
-## === DATA TYPES
-##
-
-Axis = Literal["x", "y", "z"]
-
-LOOKUP_AXIS_INDEX: dict[Axis, int] = {"x": 0, "y": 1, "z": 2}
 
 ##
 ## === DATA CLASSES
@@ -40,8 +32,8 @@ class WorkerArgs(NamedTuple):
     dataset_tag: str
     field_name: str
     field_loader: str
-    comps_to_plot: tuple[Axis, ...]
-    axes_to_slice: tuple[Axis, ...]
+    comps_to_plot: tuple[field_types.CompAxis, ...]
+    axes_to_slice: tuple[field_types.CompAxis, ...]
     cmap_name: str
     fig_dir: str
     index_width: int
@@ -82,14 +74,14 @@ class SlicedField:
 
 
 ##
-## === HELPERS
+## === HELPER FUNCTIONS
 ##
 
 
 def get_slice_bounds(
     *,
     uniform_domain: field_types.UniformDomain,
-    axis_to_slice: Axis,
+    axis_to_slice: field_types.CompAxis,
 ) -> tuple[float, float, float, float]:
     (x_min, x_max), (y_min, y_max), (z_min, z_max) = uniform_domain.domain_bounds
     if axis_to_slice == "z": return (x_min, x_max, y_min, y_max)
@@ -99,7 +91,7 @@ def get_slice_bounds(
 
 
 def get_slice_labels(
-    axis_to_slice: Axis,
+    axis_to_slice: field_types.CompAxis,
 ) -> tuple[str, str]:
     if axis_to_slice == "z": return ("x", "y")
     if axis_to_slice == "y": return ("x", "z")
@@ -110,7 +102,7 @@ def get_slice_labels(
 def slice_field(
     *,
     data_3d: numpy.ndarray,
-    axis_to_slice: Axis,
+    axis_to_slice: field_types.CompAxis,
     uniform_domain: field_types.UniformDomain,
 ) -> SlicedField:
     num_cells_x, num_cells_y, num_cells_z = data_3d.shape
@@ -152,8 +144,8 @@ def slice_field(
 class FieldPlotter:
     dataset_tag: str
     field_args: FieldArgs
-    comps_to_plot: tuple[Axis, ...]
-    axes_to_slice: tuple[Axis, ...]
+    comps_to_plot: tuple[field_types.CompAxis, ...]
+    axes_to_slice: tuple[field_types.CompAxis, ...]
 
     @staticmethod
     def plot_slice(
@@ -240,7 +232,7 @@ class FieldPlotter:
                 raise ValueError(f"Vector field '{field_name}' requires at least one component to plot; none provided.")
             return [
                 FieldComp(
-                    data_3d=field.data[LOOKUP_AXIS_INDEX[comp_name]],
+                    data_3d=field.data[field_types.DEFAULT_COMP_AXIS_TO_INDEX[comp_name]],
                     label=rf"$(${field_name}$)_{{{comp_name}}}$",
                 ) for comp_name in sorted(self.comps_to_plot)
             ]
@@ -325,8 +317,8 @@ def render_fields_in_serial(
     *,
     dataset_tag: str,
     fields_to_plot: tuple[str, ...],
-    comps_to_plot: tuple[Axis, ...],
-    axes_to_slice: tuple[Axis, ...],
+    comps_to_plot: tuple[field_types.CompAxis, ...],
+    axes_to_slice: tuple[field_types.CompAxis, ...],
     dataset_dirs: list[Path],
     fig_dir: Path,
     index_width: int,
@@ -380,8 +372,8 @@ def render_fields_in_parallel(
     *,
     dataset_tag: str,
     fields_to_plot: tuple[str, ...],
-    comps_to_plot: tuple[Axis, ...],
-    axes_to_slice: tuple[Axis, ...],
+    comps_to_plot: tuple[field_types.CompAxis, ...],
+    axes_to_slice: tuple[field_types.CompAxis, ...],
     dataset_dirs: list[Path],
     fig_dir: Path,
     index_width: int,
@@ -420,8 +412,8 @@ class ScriptInterface:
         input_dir: Path,
         dataset_tag: str,
         fields_to_plot: tuple[str, ...] | list[str] | None,
-        comps_to_plot: tuple[Axis, ...] | list[Axis] | None,
-        axes_to_slice: tuple[Axis, ...] | list[Axis] | None,
+        comps_to_plot: tuple[field_types.CompAxis, ...] | list[field_types.CompAxis] | None,
+        axes_to_slice: tuple[field_types.CompAxis, ...] | list[field_types.CompAxis] | None,
         use_parallel: bool = True,
         animate_only: bool = False,
     ):
@@ -429,14 +421,13 @@ class ScriptInterface:
         valid_fields = set(utils.QUOKKA_FIELD_LOOKUP.keys())
         if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
             raise ValueError(f"Provide one or more field to plot (via -f) from: {sorted(valid_fields)}")
-        valid_axes: set[Axis] = {"x", "y", "z"}
         if comps_to_plot is None:
-            comps_to_plot = ("x", "y", "z")
-        elif not set(comps_to_plot).issubset(valid_axes):
+            comps_to_plot = field_types.DEFAULT_COMP_AXES_ORDER
+        elif not set(comps_to_plot).issubset(set(field_types.DEFAULT_COMP_AXES_ORDER)):
             raise ValueError("Provide one or more components (via -c) from: x, y, z")
         if axes_to_slice is None:
-            axes_to_slice = ("x", "y", "z")
-        elif not set(axes_to_slice).issubset(valid_axes):
+            axes_to_slice = field_types.DEFAULT_COMP_AXES_ORDER
+        elif not set(axes_to_slice).issubset(set(field_types.DEFAULT_COMP_AXES_ORDER)):
             raise ValueError("Provide one or more axes (via -a) from: x, y, z")
         self.input_dir = Path(input_dir)
         self.dataset_tag = dataset_tag

@@ -5,7 +5,6 @@
 ##
 
 import numpy
-from typing import Literal
 from pathlib import Path
 from dataclasses import dataclass
 from jormi.ww_plots import plot_manager, add_color
@@ -14,13 +13,6 @@ from jormi.ww_data import compute_stats
 from jormi.utils import type_utils, array_utils
 from ww_quokka_sims.sim_io import load_dataset
 import utils
-
-##
-## === DATA TYPES
-##
-
-Axis = Literal["x", "y", "z"]
-LOOKUP_AXIS_INDEX: dict[Axis, int] = {"x": 0, "y": 1, "z": 2}
 
 ##
 ## === DATA CLASSES
@@ -95,7 +87,7 @@ class ComputePDFs:
         dataset_dirs: list[Path],
         field_name: str,
         field_loader: str,
-        comps_to_plot: tuple[Axis, ...],
+        comps_to_plot: tuple[field_types.CompAxis, ...],
         num_bins: int,
     ):
         self.dataset_dirs = dataset_dirs
@@ -141,7 +133,7 @@ class ComputePDFs:
         grouped_bin_centers: list[numpy.ndarray] = []
         grouped_densities: list[numpy.ndarray] = []
         for comp_name in comp_names:
-            comp_data = field.data[LOOKUP_AXIS_INDEX[comp_name]]
+            comp_data = field.data[field_types.DEFAULT_COMP_AXIS_TO_INDEX[comp_name]]
             bin_centers, densities = self._estimate_pdf(
                 field_data=comp_data,
                 num_bins=self.num_bins,
@@ -199,7 +191,7 @@ class RenderPDFs:
         dataset_dirs: list[Path],
         fig_dir: Path,
         field_name: str,
-        comps_to_plot: tuple[Axis, ...],
+        comps_to_plot: tuple[field_types.CompAxis, ...],
         cmap_name: str,
         field_loader: str,
         num_bins: int,
@@ -315,17 +307,16 @@ class ScriptInterface:
         input_dir: Path,
         dataset_tag: str,
         fields_to_plot: tuple[str, ...] | list[str] | None,
-        comps_to_plot: tuple[Axis, ...] | list[Axis] | None,
+        comps_to_plot: tuple[field_types.CompAxis, ...] | list[field_types.CompAxis] | None,
         num_bins: int = 15,
     ):
         type_utils.ensure_nonempty_str(var_obj=dataset_tag, var_name="dataset_tag")
         valid_fields = set(utils.QUOKKA_FIELD_LOOKUP.keys())
         if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
             raise ValueError(f"Provide fields via -f from: {sorted(valid_fields)}")
-        valid_axes: set[Axis] = {"x", "y", "z"}
         if comps_to_plot is None:
-            comps_to_plot = ("x", "y", "z")
-        elif not set(comps_to_plot).issubset(valid_axes):
+            comps_to_plot = field_types.DEFAULT_COMP_AXES_ORDER
+        elif not set(comps_to_plot).issubset(set(field_types.DEFAULT_COMP_AXES_ORDER)):
             raise ValueError("Provide one or more components (via -c) from: x, y, z")
         self.input_dir = Path(input_dir)
         self.dataset_tag = dataset_tag

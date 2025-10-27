@@ -170,7 +170,7 @@ def get_latest_dataset_dirs(
     ]
     dataset_dirs.sort(
         key=lambda dataset_dir: int(get_dataset_index_str(dataset_dir, dataset_tag)),
-    )  # sort by index
+    )
     return dataset_dirs
 
 

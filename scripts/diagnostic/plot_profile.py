@@ -5,7 +5,6 @@
 ##
 
 import numpy
-from typing import Literal
 from pathlib import Path
 from dataclasses import dataclass
 from jormi.utils import type_utils
@@ -13,14 +12,6 @@ from jormi.ww_plots import plot_manager, add_color
 from jormi.ww_fields import field_types
 from ww_quokka_sims.sim_io import load_dataset
 import utils
-
-##
-## === DATA TYPES
-##
-
-Axis = Literal["x", "y", "z"]
-
-LOOKUP_AXIS_INDEX: dict[Axis, int] = {"x": 0, "y": 1, "z": 2}
 
 ##
 ## === DATA CLASSES
@@ -31,7 +22,7 @@ LOOKUP_AXIS_INDEX: dict[Axis, int] = {"x": 0, "y": 1, "z": 2}
 class CompProfile:
     sim_time: float
     comp_label: str
-    axis_labels: list[Axis]
+    axis_labels: list[field_types.CompAxis]
     x_array_by_axis: list[numpy.ndarray]
     y_array_by_axis: list[numpy.ndarray]
 
@@ -65,8 +56,8 @@ class ComputeCompProfiles:
         dataset_dirs: list[Path],
         field_name: str,
         field_loader: str,
-        comps_to_plot: tuple[Axis, ...],
-        axes_to_slice: tuple[Axis, ...],
+        comps_to_plot: tuple[field_types.CompAxis, ...],
+        axes_to_slice: tuple[field_types.CompAxis, ...],
     ):
         self.dataset_dirs = dataset_dirs
         self.field_name = field_name
@@ -78,7 +69,7 @@ class ComputeCompProfiles:
     def _compute_cell_centers(
         *,
         uniform_domain: field_types.UniformDomain,
-        axis_to_slice: Axis,
+        axis_to_slice: field_types.CompAxis,
     ) -> numpy.ndarray:
         (x_min, _), (y_min, _), (z_min, _) = uniform_domain.domain_bounds
         num_cells_x, num_cells_y, num_cells_z = uniform_domain.resolution
@@ -92,7 +83,7 @@ class ComputeCompProfiles:
     def _extract_1d_midplane_profile(
         *,
         data_3d: numpy.ndarray,
-        axis_to_slice: Axis,
+        axis_to_slice: field_types.CompAxis,
     ) -> numpy.ndarray:
         num_cells_x, num_cells_y, num_cells_z = data_3d.shape
         slice_index_x = num_cells_x // 2
@@ -171,7 +162,7 @@ class ComputeCompProfiles:
                     uniform_domain=uniform_domain,
                     axis_to_slice=axis_to_slice,
                 )
-                comp_data_3d = field.data[LOOKUP_AXIS_INDEX[comp_name]]
+                comp_data_3d = field.data[field_types.DEFAULT_COMP_AXIS_TO_INDEX[comp_name]]
                 comp_profile = ComputeCompProfiles._extract_1d_midplane_profile(
                     data_3d=comp_data_3d,
                     axis_to_slice=axis_to_slice,
@@ -227,8 +218,8 @@ class RenderCompProfiles:
         *,
         dataset_dirs: list[Path],
         field_name: str,
-        comps_to_plot: tuple[Axis, ...],
-        axes_to_slice: tuple[Axis, ...],
+        comps_to_plot: tuple[field_types.CompAxis, ...],
+        axes_to_slice: tuple[field_types.CompAxis, ...],
         field_loader: str,
         cmap_name: str,
         fig_dir: Path,
@@ -246,7 +237,7 @@ class RenderCompProfiles:
         *,
         axs_grid,
         comp_labels: list[str],
-        axis_labels: list[Axis],
+        axis_labels: list[field_types.CompAxis],
     ) -> None:
         for row_index, comp_label in enumerate(comp_labels):
             for col_index, axis_label in enumerate(axis_labels):
@@ -353,21 +344,20 @@ class ScriptInterface:
         input_dir: Path,
         dataset_tag: str,
         fields_to_plot: list[str],
-        comps_to_plot: tuple[Axis, ...] | list[Axis] | None,
-        axes_to_slice: tuple[Axis, ...] | list[Axis] | None,
+        comps_to_plot: tuple[field_types.CompAxis, ...] | list[field_types.CompAxis] | None,
+        axes_to_slice: tuple[field_types.CompAxis, ...] | list[field_types.CompAxis] | None,
     ):
         type_utils.ensure_nonempty_str(var_obj=dataset_tag, var_name="dataset_tag")
         valid_fields = set(utils.QUOKKA_FIELD_LOOKUP.keys())
         if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
             raise ValueError(f"Provide fields via -f from: {sorted(valid_fields)}")
-        valid_axes: set[Axis] = {"x", "y", "z"}
         if comps_to_plot is None:
-            comps_to_plot = ("x", "y", "z")
-        elif not set(comps_to_plot).issubset(valid_axes):
+            comps_to_plot = field_types.DEFAULT_COMP_AXES_ORDER
+        elif not set(comps_to_plot).issubset(set(field_types.DEFAULT_COMP_AXES_ORDER)):
             raise ValueError("Provide one or more components (via -c) from: x, y, z")
         if axes_to_slice is None:
-            axes_to_slice = ("x", "y", "z")
-        elif not set(axes_to_slice).issubset(valid_axes):
+            axes_to_slice = field_types.DEFAULT_COMP_AXES_ORDER
+        elif not set(axes_to_slice).issubset(set(field_types.DEFAULT_COMP_AXES_ORDER)):
             raise ValueError("Provide one or more axes (via -a) from: x, y, z")
         self.input_dir = Path(input_dir)
         self.dataset_tag = dataset_tag
