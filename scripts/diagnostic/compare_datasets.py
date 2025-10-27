@@ -82,10 +82,13 @@ class DatasetView:
 @dataclass(frozen=True)
 class FieldComparison:
     same_shape: bool
-    shape_in: tuple[int, ...]
-    shape_ref: tuple[int, ...]
-    diff_indices_preview: list[tuple[int, int, int]] = field(default_factory=list)
+    shape_in: tuple[int, int, int]
+    shape_ref: tuple[int, int, int]
     num_diffs: int = 0
+    preview_diff_indices: list[tuple[int, int, int]] = field(default_factory=list)
+    preview_values_in: list[float] = field(default_factory=list)
+    preview_values_ref: list[float] = field(default_factory=list)
+    preview_abs_diff_values: list[float] = field(default_factory=list)
 
 
 class CompareFields:
@@ -111,15 +114,34 @@ class CompareFields:
         mismatched_signed_zeros_mask = both_zero_mask & diff_sign_mask
         return diff_value_mask | mismatched_signed_zeros_mask
 
-    def _get_diff_indices(
+    def _get_preview_diff_coords(
         self,
         diff_mask: numpy.ndarray,
-    ) -> list[tuple[int, int, int]]:
+    ) -> numpy.ndarray:
         if not numpy.any(diff_mask):
-            return []
+            return numpy.empty((0, 3), dtype=numpy.int64)
         diff_coords = numpy.argwhere(diff_mask)  # shape: (num_diffs, num_dims=3)
         assert diff_coords.shape[1] == 3
-        return diff_coords.tolist()
+        return diff_coords[: self.preview_limit] # shape: (limited[num_diffs], num_dims=3)
+
+    @staticmethod
+    def _get_diff_indices(
+        diff_coords: numpy.ndarray,
+    ) -> list[tuple[int, int, int]]:
+        return [
+            (int(diff_coord[0]), int(diff_coord[1]), int(diff_coord[2]))
+            for diff_coord in diff_coords
+        ]
+
+    @staticmethod
+    def _get_preview_values(
+        diff_coords: numpy.ndarray,
+        sarray_values: numpy.ndarray,
+    ) -> list[float]:
+        if diff_coords.size == 0:
+            return []
+        coords_x, coords_y, coords_z = diff_coords.T
+        return sarray_values[coords_x, coords_y, coords_z].astype(numpy.float64, copy=False).tolist()
 
     def run(
         self,
@@ -133,14 +155,30 @@ class CompareFields:
                 shape_ref=shape_ref,
             )
         diff_mask = self._get_diff_mask()
-        diff_indices = self._get_diff_indices(diff_mask)
         num_diffs = int(diff_mask.sum(dtype=numpy.int64))
+        preview_diff_coords = self._get_preview_diff_coords(diff_mask=diff_mask)
+        preview_diff_indices = self._get_diff_indices(diff_coords=preview_diff_coords)
+        preview_values_in = self._get_preview_values(
+            sarray_values=self.sarray_in,
+            diff_coords=preview_diff_coords,
+        )
+        preview_values_ref = self._get_preview_values(
+            sarray_values=self.sarray_ref,
+            diff_coords=preview_diff_coords,
+        )
+        preview_abs_diff_values = self._get_preview_values(
+            sarray_values=numpy.abs(self.sarray_ref - self.sarray_in),
+            diff_coords=preview_diff_coords,
+        )
         return FieldComparison(
             same_shape=True,
             shape_in=shape_in,
             shape_ref=shape_ref,
-            diff_indices_preview=diff_indices[:self.preview_limit],
             num_diffs=num_diffs,
+            preview_diff_indices=preview_diff_indices,
+            preview_values_in=preview_values_in,
+            preview_values_ref=preview_values_ref,
+            preview_abs_diff_values=preview_abs_diff_values,
         )
 
 
@@ -200,17 +238,17 @@ class CompareDatasets:
             log_manager.log_error(
                 text="There are no shared fields to compare.",
                 notes={
-                    "dir-in": str(self.dataset_view_in.dataset_dir),
-                    "dir-ref": str(self.dataset_view_ref.dataset_dir),
+                    "dir-IN": str(self.dataset_view_in.dataset_dir),
+                    "dir-REF": str(self.dataset_view_ref.dataset_dir),
                 },
             )
             raise SystemExit(4)
         log_manager.log_summary(
-            title="Fields",
+            title="Fields in dir-IN and dir-REF",
             notes={
-                "shared": len(shared_keys),
-                "missing_from_in": len(keys_missing_from_in),
-                "missing_from_ref": len(keys_missing_from_ref),
+                "Shared": len(shared_keys),
+                "Missing from dir-IN": len(keys_missing_from_in),
+                "Missing from dir-REF": len(keys_missing_from_ref),
             },
         )
         return shared_keys
@@ -240,14 +278,17 @@ class CompareDatasets:
         if field_comparison.num_diffs == 0:
             log_manager.log_note(f"[{field_key}] IN == REF (identical).")
             return
-        diff_label = "diff-indices"
-        if field_comparison.num_diffs > self.preview_limit:
-            diff_label += f" (preview {self.preview_limit}/{field_comparison.num_diffs})"
         num_cells = int(numpy.prod(field_comparison.shape_in))
+        warning_message = f"[{field_key}] There are {field_comparison.num_diffs}/{num_cells} cells that are different."
+        if field_comparison.num_diffs > self.preview_limit:
+            warning_message += f" (preview {self.preview_limit}/{field_comparison.num_diffs})"
         log_manager.log_warning(
-            text=f"[{field_key}] There are {field_comparison.num_diffs}/{num_cells} cells that are different.",
+            text=warning_message,
             notes={
-                diff_label: field_comparison.diff_indices_preview,
+                "diff-indices": field_comparison.preview_diff_indices,
+                "values-IN": field_comparison.preview_values_in,
+                "values-REF": field_comparison.preview_values_ref,
+                "abs-diff-values": field_comparison.preview_abs_diff_values,
                 "shape": field_comparison.shape_in,
             },
             message_position="bottom",
