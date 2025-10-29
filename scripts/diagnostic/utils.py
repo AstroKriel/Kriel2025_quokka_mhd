@@ -75,6 +75,11 @@ QUOKKA_FIELD_LOOKUP = {
         "cmap": "bwr",
         "color": "sandybrown",
     },
+    "cur": {
+        "loader": "load_current_density_magnitude_sfield",
+        "cmap": "cubehelix",
+        "color": "black",
+    },
 }
 
 ##

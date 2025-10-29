@@ -276,12 +276,12 @@ class CompareDatasets:
             )
             return
         if field_comparison.num_diffs == 0:
-            log_manager.log_note(f"[{field_key}] IN == REF (identical; shape: {field_comparison.shape_in}).")
+            log_manager.log_note(f"[{field_key}] IN == REF (no value differences over shape: {field_comparison.shape_in}).")
             return
         num_cells = int(numpy.prod(field_comparison.shape_in))
         warning_message = f"[{field_key}] There are {field_comparison.num_diffs}/{num_cells} cells that are different."
         if field_comparison.num_diffs > self.preview_limit:
-            warning_message += f" (previewing {self.preview_limit}/{field_comparison.num_diffs})"
+            warning_message += f" (previewing {self.preview_limit}/{field_comparison.num_diffs})."
         log_manager.log_warning(
             text=warning_message,
             notes={
