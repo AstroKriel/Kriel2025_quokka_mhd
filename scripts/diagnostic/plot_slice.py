@@ -5,13 +5,19 @@
 ##
 
 import numpy
+
 from typing import NamedTuple
 from pathlib import Path
 from dataclasses import dataclass
+
 from jormi.ww_io import io_manager, log_manager
-from jormi.utils import parallel_utils, type_utils
+from jormi.utils import parallel_utils
+from jormi.ww_types import type_checks
 from jormi.ww_plots import plot_manager, plot_data, annotate_axis
-from jormi.ww_fields import field_types
+
+from jormi.ww_fields import _cartesian_coordinates
+from jormi.ww_fields.fields_3d import domain_type, field_type
+
 from ww_quokka_sims.sim_io import load_dataset
 import utils
 
@@ -32,8 +38,8 @@ class WorkerArgs(NamedTuple):
     dataset_tag: str
     field_name: str
     field_loader: str
-    comps_to_plot: tuple[field_types.CompAxis, ...]
-    axes_to_slice: tuple[field_types.CompAxis, ...]
+    comps_to_plot: tuple[_cartesian_coordinates.CartesianAxis, ...]
+    axes_to_slice: tuple[_cartesian_coordinates.CartesianAxis, ...]
     cmap_name: str
     fig_dir: str
     index_width: int
@@ -41,20 +47,18 @@ class WorkerArgs(NamedTuple):
 
 @dataclass(frozen=True)
 class Dataset:
-    uniform_domain: field_types.UniformDomain
-    field: field_types.ScalarField | field_types.VectorField
+    uniform_domain: domain_type.UniformDomain_3D
+    field: field_type.ScalarField_3D | field_type.VectorField_3D
 
     @property
     def sim_time(
         self,
     ) -> float:
         sim_time = self.field.sim_time
-        type_utils.ensure_finite_float(
-            var_obj=sim_time,
-            var_name="sim_time",
-            allow_none=False,
-        )
-        assert sim_time is not None
+        if (sim_time is None) or (not numpy.isfinite(sim_time)):
+            msg = f"Invalid sim_time for field: {sim_time!r}"
+            log_manager.log_error(msg)
+            raise RuntimeError(msg)
         return float(sim_time)
 
 
@@ -64,11 +68,14 @@ class FieldComp:
     label: str
 
 
+AxisBounds = tuple[tuple[float, float], tuple[float, float]]  # ((xmin, xmax), (ymin, ymax))
+
+
 @dataclass(frozen=True)
 class SlicedField:
     data_2d: numpy.ndarray
     label: str
-    axis_bounds: tuple[float, float, float, float]
+    axis_bounds: AxisBounds
 
 
 ##
@@ -76,44 +83,89 @@ class SlicedField:
 ##
 
 
+def _as_tuple(
+    *,
+    param,
+):
+    if param is None:
+        return tuple()
+    if isinstance(param, tuple):
+        return param
+    if isinstance(param, list):
+        return tuple(param)
+    return (param,)
+
+
+def _parse_axes(
+    *,
+    axes: tuple[str, ...] | list[str] | None,
+) -> tuple[_cartesian_coordinates.CartesianAxis, ...]:
+    default_axes = tuple(_cartesian_coordinates.DEFAULT_AXES_ORDER)
+    if axes is None:
+        return default_axes
+    lookup = {axis.value: axis for axis in default_axes}
+    parsed_axes: list[_cartesian_coordinates.CartesianAxis] = []
+    for axis_name in _as_tuple(param=axes):
+        if axis_name not in lookup:
+            raise ValueError("Provide one or more axes (via -a/-c) from: x, y, z")
+        parsed_axes.append(lookup[axis_name])
+    return tuple(parsed_axes)
+
+
+def _axis_to_index(
+    axis: _cartesian_coordinates.CartesianAxis,
+) -> int:
+    default_axes = tuple(_cartesian_coordinates.DEFAULT_AXES_ORDER)
+    try:
+        return default_axes.index(axis)
+    except ValueError as exc:
+        raise ValueError(f"Unrecognised axis: {axis!r}") from exc
+
+
 def get_slice_bounds(
     *,
-    uniform_domain: field_types.UniformDomain,
-    axis_to_slice: field_types.CompAxis,
-) -> tuple[float, float, float, float]:
+    uniform_domain: domain_type.UniformDomain_3D,
+    axis_to_slice: _cartesian_coordinates.CartesianAxis,
+) -> AxisBounds:
     (x_min, x_max), (y_min, y_max), (z_min, z_max) = uniform_domain.domain_bounds
-    if axis_to_slice == "z": return (x_min, x_max, y_min, y_max)
-    if axis_to_slice == "y": return (x_min, x_max, z_min, z_max)
-    if axis_to_slice == "x": return (y_min, y_max, z_min, z_max)
+    if axis_to_slice == _cartesian_coordinates.CartesianAxis.Z:
+        return ((x_min, x_max), (y_min, y_max))
+    if axis_to_slice == _cartesian_coordinates.CartesianAxis.Y:
+        return ((x_min, x_max), (z_min, z_max))
+    if axis_to_slice == _cartesian_coordinates.CartesianAxis.X:
+        return ((y_min, y_max), (z_min, z_max))
     raise ValueError("axis_to_slice must be one of: x, y, z")
 
 
 def get_slice_labels(
-    axis_to_slice: field_types.CompAxis,
+    axis_to_slice: _cartesian_coordinates.CartesianAxis,
 ) -> tuple[str, str]:
-    if axis_to_slice == "z": return ("x", "y")
-    if axis_to_slice == "y": return ("x", "z")
-    if axis_to_slice == "x": return ("y", "z")
+    if axis_to_slice == _cartesian_coordinates.CartesianAxis.Z:
+        return ("x", "y")
+    if axis_to_slice == _cartesian_coordinates.CartesianAxis.Y:
+        return ("x", "z")
+    if axis_to_slice == _cartesian_coordinates.CartesianAxis.X:
+        return ("y", "z")
     raise ValueError("axis_to_slice must be one of: x, y, z")
 
 
 def slice_field(
     *,
     data_3d: numpy.ndarray,
-    axis_to_slice: field_types.CompAxis,
-    uniform_domain: field_types.UniformDomain,
+    axis_to_slice: _cartesian_coordinates.CartesianAxis,
+    uniform_domain: domain_type.UniformDomain_3D,
 ) -> SlicedField:
     num_cells_x, num_cells_y, num_cells_z = data_3d.shape
     slice_index_x = num_cells_x // 2
     slice_index_y = num_cells_y // 2
     slice_index_z = num_cells_z // 2
-    if axis_to_slice == "z":
+    if axis_to_slice == _cartesian_coordinates.CartesianAxis.Z:
         data_2d = data_3d[:, :, slice_index_z]
         label = r"$(x, y, z=L_z/2)$"
-    elif axis_to_slice == "y":
+    elif axis_to_slice == _cartesian_coordinates.CartesianAxis.Y:
         data_2d = data_3d[:, slice_index_y, :]
         label = r"$(x, y=L_y/2, z)$"
-    elif axis_to_slice == "x":
+    elif axis_to_slice == _cartesian_coordinates.CartesianAxis.X:
         data_2d = data_3d[slice_index_x, :, :]
         label = r"$(x=L_x/2, y, z)$"
     else:
@@ -138,8 +190,8 @@ def slice_field(
 class FieldPlotter:
     dataset_tag: str
     field_args: FieldArgs
-    comps_to_plot: tuple[field_types.CompAxis, ...]
-    axes_to_slice: tuple[field_types.CompAxis, ...]
+    comps_to_plot: tuple[_cartesian_coordinates.CartesianAxis, ...]
+    axes_to_slice: tuple[_cartesian_coordinates.CartesianAxis, ...]
 
     @staticmethod
     def plot_slice(
@@ -150,17 +202,19 @@ class FieldPlotter:
         label: str,
         cmap_name: str,
     ) -> None:
-        min_value = float(numpy.min(field_slice.data_2d))
-        max_value = float(numpy.max(field_slice.data_2d))
-        plot_data.plot_sfield_slice(
+        min_value = float(numpy.nanmin(field_slice.data_2d))
+        max_value = float(numpy.nanmax(field_slice.data_2d))
+        plot_data.plot_2d_array(
             ax=ax,
-            field_slice=field_slice.data_2d,
+            array_2d=field_slice.data_2d,
+            data_format="xy",
+            axis_aspect_ratio="equal",
             axis_bounds=field_slice.axis_bounds,
+            cbar_bounds=(min_value, max_value),
             cmap_name=cmap_name,
-            add_colorbar=True,
+            add_cbar=True,
             cbar_label=label,
             cbar_side="right",
-            cbar_bounds=(min_value, max_value),
         )
         annotate_axis.add_text(
             ax=ax,
@@ -202,9 +256,9 @@ class FieldPlotter:
         dataset_dir: Path,
     ) -> Dataset:
         with load_dataset.QuokkaDataset(dataset_dir=dataset_dir, verbose=False) as ds:
-            uniform_domain = ds.load_uniform_domain()
+            uniform_domain = ds.load_3d_uniform_domain()
             loader_fn = getattr(ds, self.field_args.field_loader)
-            field = loader_fn()  # ScalarField or VectorField
+            field = loader_fn()  # ScalarField_3D or VectorField_3D
         return Dataset(
             uniform_domain=uniform_domain,
             field=field,
@@ -213,26 +267,34 @@ class FieldPlotter:
     def _get_field_comps(
         self,
         *,
-        field: field_types.ScalarField | field_types.VectorField,
+        field: field_type.ScalarField_3D | field_type.VectorField_3D,
     ) -> list[FieldComp]:
         field_name = self.field_args.field_name
-        if isinstance(field, field_types.ScalarField):
+        if isinstance(field, field_type.ScalarField_3D):
+            sarray_3d = field_type.extract_3d_sarray(
+                sfield_3d=field,
+                param_name=f"<{field_name}_sfield_3d>",
+            )
             return [
                 FieldComp(
-                    data_3d=field.data,
+                    data_3d=sarray_3d,
                     label=field_name,
                 ),
             ]
-        if isinstance(field, field_types.VectorField):
+        if isinstance(field, field_type.VectorField_3D):
             if not self.comps_to_plot:
                 raise ValueError(
                     f"Vector field `{field_name}` requires at least one component to plot; none provided.",
                 )
+            varray_3d = field_type.extract_3d_varray(
+                vfield_3d=field,
+                param_name=f"<{field_name}_vfield_3d>",
+            )
             return [
                 FieldComp(
-                    data_3d=field.data[field_types.DEFAULT_COMP_AXIS_TO_INDEX[comp_name]],
-                    label=rf"$(${field_name}$)_{{{comp_name}}}$",
-                ) for comp_name in sorted(self.comps_to_plot)
+                    data_3d=varray_3d[_axis_to_index(comp_axis)],
+                    label=rf"$({field_name})_{{{comp_axis.value}}}$",
+                ) for comp_axis in self.comps_to_plot
             ]
         raise ValueError(f"{field_name} is an unrecognised field type.")
 
@@ -241,7 +303,7 @@ class FieldPlotter:
         *,
         axs_grid,
         field_comps: list[FieldComp],
-        uniform_domain: field_types.UniformDomain,
+        uniform_domain: domain_type.UniformDomain_3D,
         sim_time: float,
     ) -> None:
         for row_index, field_comp in enumerate(field_comps):
@@ -269,10 +331,10 @@ class FieldPlotter:
         for row_index in range(num_rows):
             for col_index, axis_to_slice in enumerate(self.axes_to_slice):
                 ax = axs_grid[row_index][col_index]
-                x_label_str, y_label_str = get_slice_labels(axis_to_slice)
+                x_label_string, y_label_string = get_slice_labels(axis_to_slice)
                 if (num_rows == 1) or (row_index == num_rows - 1):
-                    ax.set_xlabel(x_label_str)
-                ax.set_ylabel(y_label_str)
+                    ax.set_xlabel(x_label_string)
+                ax.set_ylabel(y_label_string)
 
     def plot_dataset(
         self,
@@ -284,7 +346,7 @@ class FieldPlotter:
     ) -> None:
         dataset = self._load_dataset(dataset_dir=dataset_dir)
         dataset_index = int(
-            utils.get_dataset_index_str(
+            utils.get_dataset_index_string(
                 dataset_dir=dataset_dir,
                 dataset_tag=self.dataset_tag,
             ),
@@ -315,8 +377,8 @@ def render_fields_in_serial(
     *,
     dataset_tag: str,
     fields_to_plot: tuple[str, ...],
-    comps_to_plot: tuple[field_types.CompAxis, ...],
-    axes_to_slice: tuple[field_types.CompAxis, ...],
+    comps_to_plot: tuple[_cartesian_coordinates.CartesianAxis, ...],
+    axes_to_slice: tuple[_cartesian_coordinates.CartesianAxis, ...],
     dataset_dirs: list[Path],
     fig_dir: Path,
     index_width: int,
@@ -339,7 +401,7 @@ def render_fields_in_serial(
                 fig_dir=fig_dir,
                 dataset_dir=dataset_dir,
                 index_width=index_width,
-                verbose=True,
+                verbose=False,
             )
 
 
@@ -370,17 +432,17 @@ def render_fields_in_parallel(
     *,
     dataset_tag: str,
     fields_to_plot: tuple[str, ...],
-    comps_to_plot: tuple[field_types.CompAxis, ...],
-    axes_to_slice: tuple[field_types.CompAxis, ...],
+    comps_to_plot: tuple[_cartesian_coordinates.CartesianAxis, ...],
+    axes_to_slice: tuple[_cartesian_coordinates.CartesianAxis, ...],
     dataset_dirs: list[Path],
     fig_dir: Path,
     index_width: int,
 ) -> None:
-    grouped_worker_args: list[WorkerArgs] = []
+    grouped_args: list[WorkerArgs] = []
     for field_name in fields_to_plot:
         field_meta = utils.QUOKKA_FIELD_LOOKUP[field_name]
         for dataset_dir in dataset_dirs:
-            grouped_worker_args.append(
+            grouped_args.append(
                 WorkerArgs(
                     dataset_dir=str(dataset_dir),
                     dataset_tag=dataset_tag,
@@ -395,7 +457,7 @@ def render_fields_in_parallel(
             )
     parallel_utils.run_in_parallel(
         worker_fn=_plot_dataset_worker,
-        grouped_worker_args=grouped_worker_args,
+        grouped_args=grouped_args,
         timeout_seconds=120,
         show_progress=True,
         enable_plotting=True,
@@ -410,28 +472,21 @@ class ScriptInterface:
         input_dir: Path,
         dataset_tag: str,
         fields_to_plot: tuple[str, ...] | list[str] | None,
-        comps_to_plot: tuple[field_types.CompAxis, ...] | list[field_types.CompAxis] | None,
-        axes_to_slice: tuple[field_types.CompAxis, ...] | list[field_types.CompAxis] | None,
+        comps_to_plot: tuple[str, ...] | list[str] | None,
+        axes_to_slice: tuple[str, ...] | list[str] | None,
         use_parallel: bool = True,
         animate_only: bool = False,
     ):
-        type_utils.ensure_nonempty_str(var_obj=dataset_tag, var_name="dataset_tag")
+        type_checks.ensure_nonempty_string(param=dataset_tag, param_name="dataset_tag")
         valid_fields = set(utils.QUOKKA_FIELD_LOOKUP.keys())
         if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
             raise ValueError(f"Provide one or more field to plot (via -f) from: {sorted(valid_fields)}")
-        if comps_to_plot is None:
-            comps_to_plot = field_types.DEFAULT_COMP_AXES_ORDER
-        elif not set(comps_to_plot).issubset(set(field_types.DEFAULT_COMP_AXES_ORDER)):
-            raise ValueError("Provide one or more components (via -c) from: x, y, z")
-        if axes_to_slice is None:
-            axes_to_slice = field_types.DEFAULT_COMP_AXES_ORDER
-        elif not set(axes_to_slice).issubset(set(field_types.DEFAULT_COMP_AXES_ORDER)):
-            raise ValueError("Provide one or more axes (via -a) from: x, y, z")
         self.input_dir = Path(input_dir)
         self.dataset_tag = dataset_tag
-        self.fields_to_plot = type_utils.as_tuple(seq_obj=fields_to_plot)
-        self.comps_to_plot = type_utils.as_tuple(seq_obj=comps_to_plot)
-        self.axes_to_slice = type_utils.as_tuple(seq_obj=axes_to_slice)
+        self.fields_to_plot = _as_tuple(param=fields_to_plot)
+        ## axis selection now uses CartesianAxis enums internally
+        self.comps_to_plot = _parse_axes(axes=comps_to_plot)
+        self.axes_to_slice = _parse_axes(axes=axes_to_slice)
         self.use_parallel = bool(use_parallel)
         self.animate_only = bool(animate_only)
 

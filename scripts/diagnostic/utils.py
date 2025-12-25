@@ -4,9 +4,10 @@
 ## === DEPENDENCIES
 ##
 
+import numpy
 import argparse
 from pathlib import Path
-from jormi.utils import type_utils
+from jormi.ww_types import type_checks
 from jormi.ww_io import log_manager
 from jormi.ww_plots import plot_manager
 
@@ -16,67 +17,67 @@ from jormi.ww_plots import plot_manager
 
 QUOKKA_FIELD_LOOKUP = {
     "rho": {
-        "loader": "load_density_sfield",
+        "loader": "load_3d_density_sfield",
         "cmap": "Greys",
         "color": "black",
     },
     "vel": {
-        "loader": "load_velocity_vfield",
+        "loader": "load_3d_velocity_vfield",
         "cmap": "Blues",
         "color": "royalblue",
     },
     "mag": {
-        "loader": "load_magnetic_vfield",
+        "loader": "load_3d_magnetic_vfield",
         "cmap": "Oranges",
         "color": "orangered",
     },
     "Etot": {
-        "loader": "load_total_energy_sfield",
+        "loader": "load_3d_total_energy_sfield",
         "cmap": "cividis",
         "color": "black",
     },
     "Ekin": {
-        "loader": "load_kinetic_energy_sfield",
+        "loader": "load_3d_kinetic_energy_sfield",
         "cmap": "magma",
         "color": "royalblue",
     },
     "Ekin_div": {
-        "loader": "load_div_kinetic_energy_sfield",
+        "loader": "load_3d_div_kinetic_energy_sfield",
         "cmap": "magma",
         "color": "lightskyblue",
     },
     "Ekin_sol": {
-        "loader": "load_sol_kinetic_energy_sfield",
+        "loader": "load_3d_sol_kinetic_energy_sfield",
         "cmap": "magma",
         "color": "cornflowerblue",
     },
     "Ekin_bulk": {
-        "loader": "load_bulk_kinetic_energy_sfield",
+        "loader": "load_3d_bulk_kinetic_energy_sfield",
         "cmap": "magma",
         "color": "dodgerblue",
     },
     "Emag": {
-        "loader": "load_magnetic_energy_sfield",
+        "loader": "load_3d_magnetic_energy_sfield",
         "cmap": "plasma",
         "color": "darkorchid",
     },
     "Eint": {
-        "loader": "load_internal_energy_sfield",
+        "loader": "load_3d_internal_energy_sfield",
         "cmap": "magma",
         "color": "violet",
     },
     "pressure": {
-        "loader": "load_pressure_sfield",
+        "loader": "load_3d_pressure_sfield",
         "cmap": "Purples",
         "color": "orchid",
     },
     "divb": {
-        "loader": "load_divb_sfield",
+        "loader": "load_3d_divb_sfield",
         "cmap": "bwr",
         "color": "sandybrown",
     },
     "cur": {
-        "loader": "load_current_density_magnitude_sfield",
+        "loader": "load_current_density_sfield",
         "cmap": "cubehelix",
         "color": "black",
     },
@@ -147,10 +148,20 @@ def create_figure(
     num_cols: int,
     add_cbar_space: bool = False,
 ):
+    if (num_rows == 1) and (num_cols == 1):
+        fig, ax = plot_manager.create_figure(
+            share_x=False,
+            share_y=False,
+        )
+        if add_cbar_space:
+            fig.subplots_adjust(right=0.82)
+        axs_grid = numpy.asarray([[ax]], dtype=object)
+        return fig, axs_grid
     fig, axs_grid = plot_manager.create_figure(
         num_rows=num_rows,
         num_cols=num_cols,
         share_x=False,
+        share_y=False,
         y_spacing=0.25,
         x_spacing=0.75 if add_cbar_space else 0.25,
     )
@@ -160,7 +171,7 @@ def create_figure(
 def looks_like_boxlib_dir(
     dataset_dir: Path,
 ) -> bool:
-    type_utils.ensure_type(var_obj=dataset_dir, valid_types=Path)
+    type_checks.ensure_type(param=dataset_dir, valid_types=Path)
     if not dataset_dir.exists() or not dataset_dir.is_dir():
         return False
     has_header = (dataset_dir / "Header").is_file()
@@ -191,7 +202,7 @@ def get_latest_dataset_dirs(
         if sub_dir.is_dir() and (dataset_tag in sub_dir.name) and ("old" not in sub_dir.name)
     ]
     dataset_dirs.sort(
-        key=lambda dataset_dir: int(get_dataset_index_str(dataset_dir, dataset_tag)),
+        key=lambda dataset_dir: int(get_dataset_index_string(dataset_dir, dataset_tag)),
     )
     return dataset_dirs
 
@@ -211,7 +222,7 @@ def resolve_dataset_dirs(
     return dataset_dirs
 
 
-def get_dataset_index_str(
+def get_dataset_index_string(
     dataset_dir: Path,
     dataset_tag: str,
 ) -> str:
@@ -221,10 +232,10 @@ def get_dataset_index_str(
     name_parts = dataset_name.split(dataset_tag)
     if len(name_parts) < 2:
         raise ValueError(f"Unexpected dataset name format: {dataset_name}")
-    digits_str = name_parts[1].split(".")[0]
-    if not digits_str.isdigit():
+    digits_string = name_parts[1].split(".")[0]
+    if not digits_string.isdigit():
         raise ValueError(f"Expected digits after `{dataset_tag}` in {dataset_name}")
-    return digits_str
+    return digits_string
 
 
 def get_max_index_width(
@@ -234,11 +245,11 @@ def get_max_index_width(
     if not dataset_dirs: return 1
     index_widths: list[int] = []
     for dataset_dir in dataset_dirs:
-        dataset_index_str = get_dataset_index_str(
+        dataset_index_string = get_dataset_index_string(
             dataset_dir=dataset_dir,
             dataset_tag=dataset_tag,
         )
-        index_widths.append(len(dataset_index_str))
+        index_widths.append(len(dataset_index_string))
     return max(index_widths) if len(index_widths) > 0 else 1
 
 

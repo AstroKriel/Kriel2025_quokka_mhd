@@ -7,10 +7,13 @@
 import numpy
 from pathlib import Path
 from dataclasses import dataclass
-from jormi.utils import parallel_utils, type_utils, array_utils
-from jormi.ww_data import fit_data
+
+from jormi.utils import parallel_utils
+from jormi.ww_types import type_checks, array_checks
+# from jormi.ww_data import fit_data
 from jormi.ww_plots import plot_manager, annotate_axis
-from jormi.ww_fields import field_types, field_operators
+from jormi.ww_fields.fields_3d import field_type, field_operators
+
 from ww_quokka_sims.sim_io import load_dataset
 import utils
 
@@ -51,8 +54,8 @@ class DataSeries:
                 numpy.asarray([], dtype=float),
             )
         sorted_points = sorted(self.points, key=lambda point: point.sim_time)
-        x_array = array_utils.as_1d([point.sim_time for point in sorted_points])
-        y_array = array_utils.as_1d([point.vi_value for point in sorted_points])
+        x_array = array_checks.as_1d([point.sim_time for point in sorted_points])
+        y_array = array_checks.as_1d([point.vi_value for point in sorted_points])
         return (
             x_array,
             y_array,
@@ -81,24 +84,24 @@ class LoadDataSeries:
 
     @staticmethod
     def _load_snapshot(
-        *,
         field_args: FieldArgs,
     ) -> DataPoint:
         with load_dataset.QuokkaDataset(dataset_dir=field_args.dataset_dir, verbose=False) as ds:
-            uniform_domain = ds.load_uniform_domain()
             loader_fn = getattr(ds, field_args.field_loader)
-            field = loader_fn()  # should be ScalarField
-        field_types.ensure_sfield(sfield=field)
-        assert field.sim_time is not None
-        sim_time = float(field.sim_time)
-        vi_value = field_operators.compute_sfield_volume_integral(
-            sfield=field,
-            uniform_domain=uniform_domain,
-        )
+            sfield_3d = loader_fn()
+        if not isinstance(sfield_3d, field_type.ScalarField_3D):
+            raise TypeError(
+                f"Expected ScalarField_3D from `{field_args.field_loader}`, got {type(sfield_3d).__name__}."
+            )
+        sim_time = sfield_3d.sim_time
+        if (sim_time is None) or (not numpy.isfinite(sim_time)):
+            raise ValueError(f"Invalid sim_time for field: {sim_time!r}")
+        vi_value = field_operators.compute_sfield_volume_integral(sfield_3d=sfield_3d)
         return DataPoint(
-            sim_time=sim_time,
-            vi_value=vi_value,
+            sim_time=float(sim_time),
+            vi_value=float(vi_value),
         )
+
 
     def run(
         self,
@@ -115,7 +118,7 @@ class LoadDataSeries:
         if self.use_parallel and (len(grouped_field_args) > 5):
             data_points: list[DataPoint] = parallel_utils.run_in_parallel(
                 worker_fn=LoadDataSeries._load_snapshot,
-                grouped_worker_args=grouped_field_args,
+                grouped_args=grouped_field_args,
                 timeout_seconds=120,
                 show_progress=True,
                 enable_plotting=True,
@@ -185,8 +188,10 @@ class RenderDataSeries:
         x_array: numpy.ndarray,
         y_array: numpy.ndarray,
     ) -> None:
+        return ## TODO
         num_points = int(x_array.size)
-        if num_points < 3: return
+        if num_points < 3:
+            return
         end_index = max(3, 3 * num_points // 4)
         ds = fit_data.DataSeries(
             x_data_array=x_array[:end_index],
@@ -195,12 +200,19 @@ class RenderDataSeries:
         fit_summary = fit_data.fit_linear_model(ds)
         slope_stat = fit_summary.get_param("slope")
         intercept_stat = fit_summary.get_param("intercept")
-        slope_value = slope_stat.value
-        intercept_value = intercept_stat.value
+        slope_value = float(slope_stat.value)
+        intercept_value = float(intercept_stat.value)
         x0, x1 = float(x_array[0]), float(x_array[-1])
         y0 = intercept_value + slope_value * x0
         y1 = intercept_value + slope_value * x1
-        ax.plot([x0, x1], [y0, y1], linestyle="--", linewidth=1.5, color=self.color, alpha=0.9)
+        ax.plot(
+            [x0, x1],
+            [y0, y1],
+            linestyle="--",
+            linewidth=1.5,
+            color=self.color,
+            alpha=0.9,
+        )
         RenderDataSeries._annotate_fit(
             ax=ax,
             slope_stat=slope_stat,
@@ -213,8 +225,7 @@ class RenderDataSeries:
         *,
         data_series: DataSeries,
     ) -> None:
-        fig, axs_grid = plot_manager.create_figure()
-        ax = axs_grid[0, 0]
+        fig, ax = plot_manager.create_figure()
         x_array, y_array = data_series.get_sorted_arrays()
         if x_array.size == 0:
             annotate_axis.add_text(
@@ -226,7 +237,15 @@ class RenderDataSeries:
                 y_alignment="center",
             )
             return
-        ax.plot(x_array, y_array, color=self.color, marker="o", ms=6, ls="-", lw=1.5)
+        ax.plot(
+            x_array,
+            y_array,
+            color=self.color,
+            marker="o",
+            ms=6,
+            ls="-",
+            lw=1.5,
+        )
         self._fit_linear_and_plot(
             ax=ax,
             x_array=x_array,
@@ -252,13 +271,16 @@ class ScriptInterface:
         fields_to_plot: list[str],
         use_parallel: bool = True,
     ):
-        type_utils.ensure_nonempty_str(var_obj=dataset_tag, var_name="dataset_tag")
+        type_checks.ensure_nonempty_string(
+            param=dataset_tag,
+            param_name="dataset_tag",
+        )
         valid_fields = set(utils.QUOKKA_FIELD_LOOKUP.keys())
         if (not fields_to_plot) or (not set(fields_to_plot).issubset(valid_fields)):
             raise ValueError(f"Provide one or more fields to plot (via -f) from: {sorted(valid_fields)}")
         self.input_dir = Path(input_dir)
         self.dataset_tag = dataset_tag
-        self.fields_to_plot = fields_to_plot
+        self.fields_to_plot = list(fields_to_plot)
         self.use_parallel = bool(use_parallel)
 
     def run(
