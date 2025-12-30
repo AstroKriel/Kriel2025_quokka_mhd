@@ -71,7 +71,7 @@ class RenderComparisonPlot:
         fig, ax = plot_manager.create_figure()
         ax.plot(
             x_array_1,
-            y_array_1,
+            y_array_2 / y_array_1 - 1,
             color=self.color,
             marker=self.marker_dir_1,
             ms=6,
@@ -79,19 +79,19 @@ class RenderComparisonPlot:
             lw=1.5,
             label=self.label_dir_1,
         )
-        ax.plot(
-            x_array_2,
-            y_array_2,
-            color=self.color,
-            marker=self.marker_dir_2,
-            ms=6,
-            ls="-",
-            lw=1.5,
-            label=self.label_dir_2,
-        )
+        # ax.plot(
+        #     x_array_2,
+        #     y_array_2,
+        #     color=self.color,
+        #     marker=self.marker_dir_2,
+        #     ms=6,
+        #     ls="-",
+        #     lw=1.5,
+        #     label=self.label_dir_2,
+        # )
         ax.set_xlabel("time")
-        ax.set_ylabel(self.field_name)
-        ax.legend(loc="best")
+        ax.set_ylabel(self.field_name + " (fractional difference)")
+        # ax.legend(loc="best")
         fig_path = self.fig_dir / f"{self.field_name}_time_comparison.png"
         plot_manager.save_figure(
             fig=fig,
