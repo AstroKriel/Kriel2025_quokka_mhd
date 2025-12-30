@@ -148,9 +148,13 @@ class ScriptInterface:
             dataset_tag=self.dataset_tag,
         )
         if not dataset_dirs_1:
-            raise RuntimeError(f"No dataset directories resolved for dir_1: {self.dir_1} (tag={self.dataset_tag!r})")
+            raise RuntimeError(
+                f"No dataset directories resolved for dir_1: {self.dir_1} (tag={self.dataset_tag!r})"
+            )
         if not dataset_dirs_2:
-            raise RuntimeError(f"No dataset directories resolved for dir_2: {self.dir_2} (tag={self.dataset_tag!r})")
+            raise RuntimeError(
+                f"No dataset directories resolved for dir_2: {self.dir_2} (tag={self.dataset_tag!r})"
+            )
         label_dir_1 = self.dir_1.name
         label_dir_2 = self.dir_2.name
         for field_name in self.fields_to_plot:
@@ -208,9 +212,9 @@ def _get_user_args():
     parser.add_argument(
         "--tag",
         "-t",
-        type=str,
-        required=True,
-        help="Dataset tag to resolve within each directory.",
+        default="plt",
+        help=
+        "Dataset tag used to identify output directories (e.g., `plt` -> plt00010, plt00020). Default: `plt`.",
     )
     field_list = list_utils.as_string(elems=sorted(utils.QUOKKA_FIELD_LOOKUP.keys()))
     parser.add_argument(

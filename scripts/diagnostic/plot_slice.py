@@ -10,15 +10,15 @@ from typing import NamedTuple
 from pathlib import Path
 from dataclasses import dataclass
 
-from jormi.ww_io import io_manager, log_manager
 from jormi.utils import parallel_utils
 from jormi.ww_types import type_checks
+from jormi.ww_io import io_manager, log_manager
 from jormi.ww_plots import plot_manager, plot_data, annotate_axis
-
 from jormi.ww_fields import _cartesian_coordinates
 from jormi.ww_fields.fields_3d import domain_type, field_type
 
 from ww_quokka_sims.sim_io import load_dataset
+
 import utils
 
 ##
@@ -83,19 +83,6 @@ class SlicedField:
 ##
 
 
-def _as_tuple(
-    *,
-    param,
-):
-    if param is None:
-        return tuple()
-    if isinstance(param, tuple):
-        return param
-    if isinstance(param, list):
-        return tuple(param)
-    return (param,)
-
-
 def _parse_axes(
     *,
     axes: tuple[str, ...] | list[str] | None,
@@ -105,7 +92,7 @@ def _parse_axes(
         return default_axes
     lookup = {axis.value: axis for axis in default_axes}
     parsed_axes: list[_cartesian_coordinates.CartesianAxis] = []
-    for axis_name in _as_tuple(param=axes):
+    for axis_name in type_checks.as_tuple(param=axes):
         if axis_name not in lookup:
             raise ValueError("Provide one or more axes (via -a/-c) from: x, y, z")
         parsed_axes.append(lookup[axis_name])
@@ -483,7 +470,7 @@ class ScriptInterface:
             raise ValueError(f"Provide one or more field to plot (via -f) from: {sorted(valid_fields)}")
         self.input_dir = Path(input_dir)
         self.dataset_tag = dataset_tag
-        self.fields_to_plot = _as_tuple(param=fields_to_plot)
+        self.fields_to_plot = type_checks.as_tuple(param=fields_to_plot)
         ## axis selection now uses CartesianAxis enums internally
         self.comps_to_plot = _parse_axes(axes=comps_to_plot)
         self.axes_to_slice = _parse_axes(axes=axes_to_slice)
@@ -525,6 +512,7 @@ class ScriptInterface:
         dataset_dirs = utils.resolve_dataset_dirs(
             input_dir=self.input_dir,
             dataset_tag=self.dataset_tag,
+            max_elems=100,
         )
         if not dataset_dirs:
             return
