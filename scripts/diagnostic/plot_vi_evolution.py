@@ -15,6 +15,7 @@ from jormi.ww_plots import plot_manager, annotate_axis
 from jormi.ww_fields.fields_3d import field_type, field_operators
 
 from ww_quokka_sims.sim_io import load_dataset
+
 import utils
 
 ##
@@ -91,7 +92,7 @@ class LoadDataSeries:
             sfield_3d = loader_fn()
         if not isinstance(sfield_3d, field_type.ScalarField_3D):
             raise TypeError(
-                f"Expected ScalarField_3D from `{field_args.field_loader}`, got {type(sfield_3d).__name__}."
+                f"Expected ScalarField_3D from `{field_args.field_loader}`, got {type(sfield_3d).__name__}.",
             )
         sim_time = sfield_3d.sim_time
         if (sim_time is None) or (not numpy.isfinite(sim_time)):
@@ -101,7 +102,6 @@ class LoadDataSeries:
             sim_time=float(sim_time),
             vi_value=float(vi_value),
         )
-
 
     def run(
         self,
@@ -188,37 +188,37 @@ class RenderDataSeries:
         x_array: numpy.ndarray,
         y_array: numpy.ndarray,
     ) -> None:
-        return ## TODO
-        num_points = int(x_array.size)
-        if num_points < 3:
-            return
-        end_index = max(3, 3 * num_points // 4)
-        ds = fit_data.DataSeries(
-            x_data_array=x_array[:end_index],
-            y_data_array=y_array[:end_index],
-        )
-        fit_summary = fit_data.fit_linear_model(ds)
-        slope_stat = fit_summary.get_param("slope")
-        intercept_stat = fit_summary.get_param("intercept")
-        slope_value = float(slope_stat.value)
-        intercept_value = float(intercept_stat.value)
-        x0, x1 = float(x_array[0]), float(x_array[-1])
-        y0 = intercept_value + slope_value * x0
-        y1 = intercept_value + slope_value * x1
-        ax.plot(
-            [x0, x1],
-            [y0, y1],
-            linestyle="--",
-            linewidth=1.5,
-            color=self.color,
-            alpha=0.9,
-        )
-        RenderDataSeries._annotate_fit(
-            ax=ax,
-            slope_stat=slope_stat,
-            intercept_stat=intercept_stat,
-            color=self.color,
-        )
+        return  ## TODO: update
+        # num_points = int(x_array.size)
+        # if num_points < 3:
+        #     return
+        # end_index = max(3, 3 * num_points // 4)
+        # ds = fit_data.DataSeries(
+        #     x_data_array=x_array[:end_index],
+        #     y_data_array=y_array[:end_index],
+        # )
+        # fit_summary = fit_data.fit_linear_model(ds)
+        # slope_stat = fit_summary.get_param("slope")
+        # intercept_stat = fit_summary.get_param("intercept")
+        # slope_value = float(slope_stat.value)
+        # intercept_value = float(intercept_stat.value)
+        # x0, x1 = float(x_array[0]), float(x_array[-1])
+        # y0 = intercept_value + slope_value * x0
+        # y1 = intercept_value + slope_value * x1
+        # ax.plot(
+        #     [x0, x1],
+        #     [y0, y1],
+        #     linestyle="--",
+        #     linewidth=1.5,
+        #     color=self.color,
+        #     alpha=0.9,
+        # )
+        # RenderDataSeries._annotate_fit(
+        #     ax=ax,
+        #     slope_stat=slope_stat,
+        #     intercept_stat=intercept_stat,
+        #     color=self.color,
+        # )
 
     def run(
         self,
