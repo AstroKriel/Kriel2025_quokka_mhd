@@ -142,10 +142,12 @@ class ScriptInterface:
         dataset_dirs_1 = utils.resolve_dataset_dirs(
             input_dir=self.dir_1,
             dataset_tag=self.dataset_tag,
+            max_elems=100,
         )
         dataset_dirs_2 = utils.resolve_dataset_dirs(
             input_dir=self.dir_2,
             dataset_tag=self.dataset_tag,
+            max_elems=100,
         )
         if not dataset_dirs_1:
             raise RuntimeError(

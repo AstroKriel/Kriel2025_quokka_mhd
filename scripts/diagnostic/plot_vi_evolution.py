@@ -289,6 +289,7 @@ class ScriptInterface:
         dataset_dirs = utils.resolve_dataset_dirs(
             input_dir=self.input_dir,
             dataset_tag=self.dataset_tag,
+            max_elems=100,
         )
         if not dataset_dirs:
             return
