@@ -6,7 +6,10 @@
 
 import numpy
 import argparse
+
 from pathlib import Path
+
+from jormi.utils import list_utils
 from jormi.ww_types import type_checks
 from jormi.ww_io import log_manager
 from jormi.ww_plots import plot_manager
@@ -106,12 +109,13 @@ def get_user_args():
         help=
         "Dataset tag used to identify output directories (e.g., `plt` -> plt00010, plt00020). Default: `plt`.",
     )
+    field_list = list_utils.as_string(elems=sorted(QUOKKA_FIELD_LOOKUP.keys()))
     parser.add_argument(
         "--fields",
         "-f",
         nargs="+",
         default=None,
-        help="Optional list of (vector and/or scalar) fields to plot.",
+        help=f"List of (vector and/or scalar) fields to plot. Options: {field_list}",
     )
     parser.add_argument(
         "--comps",
@@ -210,6 +214,7 @@ def get_latest_dataset_dirs(
 def resolve_dataset_dirs(
     input_dir: Path,
     dataset_tag: str,
+    max_elems: int | None = None,
 ) -> list[Path]:
     if (dataset_tag in input_dir.name) or looks_like_boxlib_dir(input_dir):
         return [input_dir]
@@ -219,6 +224,11 @@ def resolve_dataset_dirs(
     )
     if not dataset_dirs:
         raise ValueError(f"No dataset directories found using tag `{dataset_tag}` under: {input_dir}")
+    if max_elems is not None:
+        dataset_dirs = list_utils.sample_list(
+            elems=dataset_dirs,
+            max_elems=100,
+        )
     return dataset_dirs
 
 
