@@ -90,7 +90,7 @@ class RenderComparisonPlot:
         #     label=self.label_dir_2,
         # )
         ax.set_xlabel("time")
-        ax.set_ylabel(self.field_name + " (fractional difference)")
+        ax.set_ylabel(self.field_name + " (frac. diff.)")
         # ax.legend(loc="best")
         fig_path = self.fig_dir / f"{self.field_name}_time_comparison.png"
         plot_manager.save_figure(
