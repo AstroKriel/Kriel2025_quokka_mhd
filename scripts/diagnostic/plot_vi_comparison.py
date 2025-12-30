@@ -7,9 +7,12 @@
 import argparse
 from pathlib import Path
 
+import numpy
+
 from jormi.ww_types import type_checks
 from jormi.utils import list_utils
 from jormi.ww_io import io_manager
+from jormi.ww_data import interpolate_series
 from jormi.ww_plots import plot_manager
 
 from plot_vi_evolution import DataSeries, LoadDataSeries
@@ -68,30 +71,60 @@ class RenderComparisonPlot:
                 f"dir_1 ({self.label_dir_1}): {x_array_1.size} points\n"
                 f"dir_2 ({self.label_dir_2}): empty DataSeries",
             )
+        x1_min = float(x_array_1[0])
+        x1_max = float(x_array_1[-1])
+        x2_min = float(x_array_2[0])
+        x2_max = float(x_array_2[-1])
+        in_bounds_mask_1 = (x2_min <= x_array_1) & (x_array_1 <= x2_max)
+        if not numpy.any(in_bounds_mask_1):
+            raise RuntimeError(
+                "There are no overlapping times for the comparison.\n"
+                f"dir_1 ({self.label_dir_1}): x in [{x1_min}, {x1_max}]\n"
+                f"dir_2 ({self.label_dir_2}): x in [{x2_min}, {x2_max}]",
+            )
+        x_array_common = x_array_1[in_bounds_mask_1]
+        y_array_1_common = y_array_1[in_bounds_mask_1]
+        x_array_common, y_array_2_interp = interpolate_series.interpolate_1d(
+            x_values=x_array_2,
+            y_values=y_array_2,
+            x_interp=x_array_common,
+            kind="cubic",
+        )
+        if x_array_common.size == 0:
+            raise RuntimeError(
+                "No overlapping times remain after interpolation bounds handling.\n"
+                f"dir_1 ({self.label_dir_1}): x in [{float(x_array_1[0])}, {float(x_array_1[-1])}]\n"
+                f"dir_2 ({self.label_dir_2}): x in [{x2_min}, {x2_max}]",
+            )
+        y_array_1_common = y_array_1_common[: x_array_common.size]
+        if not numpy.all(numpy.isfinite(y_array_1_common)):
+            raise RuntimeError(
+                f"Non-finite values found in dir_1 ({self.label_dir_1}) on the comparison grid.",
+            )
+        if not numpy.all(numpy.isfinite(y_array_2_interp)):
+            raise RuntimeError(
+                f"Non-finite values found in interpolated dir_2 ({self.label_dir_2}) on the comparison grid.",
+            )
+        zero_mask = numpy.isclose(y_array_1_common, 0.0, rtol=0.0, atol=0.0)
+        if numpy.any(zero_mask):
+            raise RuntimeError(
+                "Cannot compute fractional difference because dir_1 contains zeros on the comparison grid.\n"
+                f"dir_1 ({self.label_dir_1}): {int(numpy.sum(zero_mask))} zero values in y_array",
+            )
+        y_array_frac_diff = y_array_2_interp / y_array_1_common - 1.0
         fig, ax = plot_manager.create_figure()
         ax.plot(
-            x_array_1,
-            y_array_2 / y_array_1 - 1,
+            x_array_common,
+            y_array_frac_diff,
             color=self.color,
-            marker=self.marker_dir_1,
+            marker=self.marker_dir_2,
             ms=6,
             ls="-",
             lw=1.5,
-            label=self.label_dir_1,
+            label=f"{self.label_dir_2}/{self.label_dir_1} - 1",
         )
-        # ax.plot(
-        #     x_array_2,
-        #     y_array_2,
-        #     color=self.color,
-        #     marker=self.marker_dir_2,
-        #     ms=6,
-        #     ls="-",
-        #     lw=1.5,
-        #     label=self.label_dir_2,
-        # )
         ax.set_xlabel("time")
         ax.set_ylabel(self.field_name + " (frac. diff.)")
-        # ax.legend(loc="best")
         fig_path = self.fig_dir / f"{self.field_name}_time_comparison.png"
         plot_manager.save_figure(
             fig=fig,
