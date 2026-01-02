@@ -6,7 +6,7 @@ import numpy
 import argparse
 from pathlib import Path
 from dataclasses import dataclass, field
-from jormi.utils import type_utils
+from jormi.ww_types import type_checks
 from jormi.ww_io import log_manager
 from ww_quokka_sims.sim_io import load_dataset
 import utils
@@ -70,8 +70,8 @@ class DatasetView:
         field_key: load_dataset.FieldKey,
     ) -> numpy.ndarray:
         with load_dataset.QuokkaDataset(dataset_dir=self.dataset_dir, verbose=False) as ds:
-            sarray = ds._load_sfield_data(field_key=field_key)
-        return numpy.ascontiguousarray(sarray, dtype=numpy.float64)
+            sarray_3d = ds._load_3d_sarray(field_key=field_key)
+        return numpy.ascontiguousarray(sarray_3d, dtype=numpy.float64)
 
 
 ##
@@ -122,16 +122,13 @@ class CompareFields:
             return numpy.empty((0, 3), dtype=numpy.int64)
         diff_coords = numpy.argwhere(diff_mask)  # shape: (num_diffs, num_dims=3)
         assert diff_coords.shape[1] == 3
-        return diff_coords[: self.preview_limit]  # shape: (limited[num_diffs], num_dims=3)
+        return diff_coords[:self.preview_limit]  # shape: (limited[num_diffs], num_dims=3)
 
     @staticmethod
     def _get_diff_indices(
         diff_coords: numpy.ndarray,
     ) -> list[tuple[int, int, int]]:
-        return [
-            (int(diff_coord[0]), int(diff_coord[1]), int(diff_coord[2]))
-            for diff_coord in diff_coords
-        ]
+        return [(int(diff_coord[0]), int(diff_coord[1]), int(diff_coord[2])) for diff_coord in diff_coords]
 
     @staticmethod
     def _get_preview_values(
@@ -276,7 +273,9 @@ class CompareDatasets:
             )
             return
         if field_comparison.num_diffs == 0:
-            log_manager.log_note(f"[{field_key}] IN == REF (no value differences over shape: {field_comparison.shape_in}).")
+            log_manager.log_note(
+                f"[{field_key}] IN == REF (no value differences over shape: {field_comparison.shape_in}).",
+            )
             return
         num_cells = int(numpy.prod(field_comparison.shape_in))
         warning_message = f"[{field_key}] There are {field_comparison.num_diffs}/{num_cells} cells that are different."
@@ -324,7 +323,7 @@ class ScriptInterface:
     def _validate_inputs(
         self,
     ) -> None:
-        type_utils.ensure_finite_int(var_obj=self.preview_limit)
+        type_checks.ensure_finite_int(param=self.preview_limit)
         assert self.preview_limit > 0
         utils.ensure_looks_like_boxlib_dir(dataset_dir=self.dataset_dir_in)
         utils.ensure_looks_like_boxlib_dir(dataset_dir=self.dataset_dir_ref)
