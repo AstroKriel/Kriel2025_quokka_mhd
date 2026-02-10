@@ -3,7 +3,7 @@
 import math
 from typing import Any, Union
 from pathlib import Path
-from jormi.ww_io import io_manager, shell_manager, json_files
+from jormi.ww_io import io_manager, shell_manager, json_io
 from jormi.ww_jobs import pbs_job_manager
 
 ## macOS
@@ -67,7 +67,7 @@ def is_power_of_two(value: int) -> bool:
 
 def get_domain_params(
     *,
-    cells_per_block_dim: int,  # quantisation of work (AMReX blocking-factor)
+    cells_per_block_dim: int,  # quantisation of work (BoxLib blocking-factor)
     blocks_per_sim_dim: int,  # domain decomposition
     blocks_per_box_dim: int,  # amount of communication within rank
     boxes_per_rank: int,  # amount of work taken on by each rank
@@ -124,7 +124,7 @@ def get_domain_params(
     nodes_used = math.ceil(mpi_ranks_requested / num_procs_per_node)
     mpi_rank_utilisation = 100 * mpi_ranks_w_work / mpi_ranks_requested
     return {
-        ## AMReX params
+        ## BoxLib params
         "amr.max_level": 0,
         "amr.n_cell": f"{cells_per_sim_dim} {cells_per_sim_dim} {cells_per_sim_dim}",
         "amr.max_grid_size": cells_per_box_dim,
@@ -182,7 +182,9 @@ def get_sim_params(
     return sim_params
 
 
-def get_scheme_label(sim_params: dict) -> str:
+def get_scheme_label(
+    sim_params: dict,
+) -> str:
     emf_scheme = "fcvel" if EMF_SCHEME else "fs"
     emf_ave_scheme = sim_params["mhd.emf_averaging_method"].lower()
     spatial_order = "ro{}".format(sim_params["hydro.reconstruction_order"])
@@ -191,7 +193,9 @@ def get_scheme_label(sim_params: dict) -> str:
     return "_".join([emf_scheme, emf_ave_scheme, spatial_order, time_order, cfl])
 
 
-def get_domain_label(domain_params: dict[str, Any]) -> str:
+def get_domain_label(
+    domain_params: dict[str, Any],
+) -> str:
     cells_per_sim_dim = "N{}".format(domain_params["cells_per_sim_dim"])
     cells_per_box_dim = "Nbo{}".format(domain_params["cells_per_box_dim"])
     cells_per_block_dim = "Nbl{}".format(domain_params["cells_per_block_dim"])
@@ -213,7 +217,11 @@ def adjust_input_file(
     sim_params: dict[str, Any],
 ) -> None:
 
-    def _replace_or_add(_file_lines, _key, _value):
+    def _replace_or_add(
+        _file_lines,
+        _key,
+        _value,
+    ):
         for line_index, line_content in enumerate(_file_lines):
             if line_content.startswith("#"): continue
             if line_content.strip().startswith(f"{_key}"):
@@ -262,12 +270,12 @@ def setup_problem(
     target_problem_dir = DATA_DIR / "sims" / scaling_mode / problem_name / scheme_label / domain_label
     io_manager.init_directory(target_problem_dir)
     ## save generated parameter files
-    json_files.save_dict_to_json_file(
+    json_io.save_dict_to_json_file(
         file_path=target_problem_dir / "domain_params.json",
         input_dict=domain_params,
         overwrite=True,
     )
-    json_files.save_dict_to_json_file(
+    json_io.save_dict_to_json_file(
         file_path=target_problem_dir / "sim_params.json",
         input_dict=sim_params,
         overwrite=True,
@@ -296,26 +304,26 @@ def setup_problem(
     uv_project = Path(__file__).parent.parent
     plotting_script_path = uv_project / "scripts/plot_field_slices.py"
     job_path = pbs_job_manager.create_pbs_job_script(
-      system_name        = "gadi",
-      directory          = target_problem_dir,
-      file_name          = f"job.sh",
-      prep_command       = "source ~/modules_quokka",
-      main_command       = f"mpirun -np {mpi_ranks} {exe_file_name} {input_file_name}",
-      post_command       = (
-        f'uv run --project "{uv_project}" '
-        f'python "{plotting_script_path}" "{target_problem_dir}"'
-      ),
-      always_run_post    = True,
-      tag_name           = job_tag,
-      queue_name         = "normal", # "rsaa",
-      compute_group_name = "jh2", # "mk27",
-      num_procs          = mpi_ranks,
-      wall_time_hours    = 12,
-      storage_group_name = "jh2",
-      email_address      = "neco.kriel@anu.edu.au",
-      email_on_start     = False,
-      email_on_finish    = True,
-      verbose            = True,
+        system_name        = "gadi",
+        directory          = target_problem_dir,
+        file_name          = f"job.sh",
+        prep_command       = "source ~/modules_quokka",
+        main_command       = f"mpirun -np {mpi_ranks} {exe_file_name} {input_file_name}",
+        post_command       = (
+            f'uv run --project "{uv_project}" '
+            f'python "{plotting_script_path}" "{target_problem_dir}"'
+        ),
+        always_run_post    = True,
+        tag_name           = job_tag,
+        queue_name         = "normal", # "rsaa",
+        compute_group_name = "jh2", # "mk27",
+        num_procs          = mpi_ranks,
+        wall_time_hours    = 12,
+        storage_group_name = "jh2",
+        email_address      = "neco.kriel@anu.edu.au",
+        email_on_start     = False,
+        email_on_finish    = True,
+        verbose            = True,
     )
     if EXECUTE_JOB:
         shell_manager.execute_shell_command(

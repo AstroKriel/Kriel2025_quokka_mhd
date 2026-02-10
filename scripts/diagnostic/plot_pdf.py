@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from jormi.ww_plots import plot_manager, add_color
 from jormi.ww_fields import field_types
 from jormi.ww_data import compute_stats
-from jormi.utils import type_utils, array_utils
+from jormi.ww_types import type_manager, array_checks
 from ww_quokka_sims.sim_io import load_dataset
 import utils
 
@@ -30,25 +30,25 @@ class PDFData:
         self,
     ) -> None:
         ## container validation
-        type_utils.ensure_sequence(
-            var_obj=self.grouped_bin_centers,
-            valid_containers=(list, tuple),
-            var_name="grouped_bin_centers",
+        type_manager.ensure_sequence(
+            param=self.grouped_bin_centers,
+            valid_seq_types=(list, tuple),
+            param_name="grouped_bin_centers",
             seq_length=len(self.comp_labels),
         )
-        type_utils.ensure_sequence(
-            var_obj=self.grouped_densities,
-            valid_containers=(list, tuple),
-            var_name="grouped_densities",
+        type_manager.ensure_sequence(
+            param=self.grouped_densities,
+            valid_seq_types=(list, tuple),
+            param_name="grouped_densities",
             seq_length=len(self.comp_labels),
         )
         ## validate each comp-array
         for (bin_centers, densities) in zip(self.grouped_bin_centers, self.grouped_densities):
-            array_utils.ensure_array(array=bin_centers)
-            array_utils.ensure_array(array=densities)
-            array_utils.ensure_1d(array=bin_centers)
-            array_utils.ensure_1d(array=densities)
-            array_utils.ensure_same_shape(
+            array_checks.ensure_array(array=bin_centers)
+            array_checks.ensure_array(array=densities)
+            array_checks.ensure_1d(array=bin_centers)
+            array_checks.ensure_1d(array=densities)
+            array_checks.ensure_same_shape(
                 array_a=bin_centers,
                 array_b=densities,
             )
@@ -87,7 +87,7 @@ class ComputePDFs:
         dataset_dirs: list[Path],
         field_name: str,
         field_loader: str,
-        comps_to_plot: tuple[field_types.CompAxis, ...],
+        comps_to_plot: tuple[field_types.AxisName, ...],
         num_bins: int,
     ):
         self.dataset_dirs = dataset_dirs
@@ -115,9 +115,9 @@ class ComputePDFs:
         field: field_types.ScalarField | field_types.VectorField,
     ) -> float:
         sim_time = field.sim_time
-        type_utils.ensure_finite_float(
-            var_obj=sim_time,
-            var_name="sim_time",
+        type_manager.ensure_finite_float(
+            param=sim_time,
+            param_name="sim_time",
             allow_none=False,
         )
         assert sim_time is not None
@@ -138,7 +138,7 @@ class ComputePDFs:
         grouped_bin_centers: list[numpy.ndarray] = []
         grouped_densities: list[numpy.ndarray] = []
         for comp_name in comp_names:
-            comp_data = field.data[field_types.DEFAULT_COMP_AXIS_TO_INDEX[comp_name]]
+            comp_data = field.data[field_types.AXIS_NAME_TO_INDEX_VALUE[comp_name]]
             bin_centers, densities = self._estimate_pdf(
                 field_data=comp_data,
                 num_bins=self.num_bins,
@@ -196,7 +196,7 @@ class RenderPDFs:
         dataset_dirs: list[Path],
         fig_dir: Path,
         field_name: str,
-        comps_to_plot: tuple[field_types.CompAxis, ...],
+        comps_to_plot: tuple[field_types.AxisName, ...],
         cmap_name: str,
         field_loader: str,
         num_bins: int,
@@ -316,21 +316,21 @@ class ScriptInterface:
         input_dir: Path,
         dataset_tag: str,
         fields_to_plot: tuple[str, ...] | list[str] | None,
-        comps_to_plot: tuple[field_types.CompAxis, ...] | list[field_types.CompAxis] | None,
+        comps_to_plot: tuple[field_types.AxisName, ...] | list[field_types.AxisName] | None,
         num_bins: int = 15,
     ):
-        type_utils.ensure_nonempty_str(var_obj=dataset_tag, var_name="dataset_tag")
+        type_manager.ensure_nonempty_string(param=dataset_tag, param_name="dataset_tag")
         valid_fields = set(utils.QUOKKA_FIELD_LOOKUP.keys())
         if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
             raise ValueError(f"Provide fields via -f from: {sorted(valid_fields)}")
         if comps_to_plot is None:
-            comps_to_plot = field_types.DEFAULT_COMP_AXES_ORDER
-        elif not set(comps_to_plot).issubset(set(field_types.DEFAULT_COMP_AXES_ORDER)):
+            comps_to_plot = field_types.AXES_NAMES
+        elif not set(comps_to_plot).issubset(set(field_types.AXES_NAMES)):
             raise ValueError("Provide one or more components (via -c) from: x, y, z")
         self.input_dir = Path(input_dir)
         self.dataset_tag = dataset_tag
-        self.fields_to_plot = type_utils.as_tuple(seq_obj=fields_to_plot)
-        self.comps_to_plot = type_utils.as_tuple(seq_obj=comps_to_plot)
+        self.fields_to_plot = type_manager.as_tuple(param=fields_to_plot)
+        self.comps_to_plot = type_manager.as_tuple(param=comps_to_plot)
         self.num_bins = int(num_bins)
 
     def run(

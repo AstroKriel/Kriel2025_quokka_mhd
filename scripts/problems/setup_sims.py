@@ -3,7 +3,7 @@
 import math
 from typing import Any, Union
 from pathlib import Path
-from jormi.ww_io import io_manager, json_files
+from jormi.ww_io import io_manager, json_io
 
 ## macOS
 CODEBASE_DIR = Path("/Users/necoturb/Documents/Codes/quokka")
@@ -62,7 +62,7 @@ def is_power_of_two(value: int) -> bool:
 
 def get_domain_params(
     *,
-    cells_per_block_dim: int,  # quantisation of work (AMReX blocking-factor)
+    cells_per_block_dim: int,  # quantisation of work (BoxLib blocking-factor)
     blocks_per_sim_dim: int,  # domain decomposition
     blocks_per_box_dim: int,  # amount of communication within rank
     boxes_per_rank: int,  # amount of work taken on by each rank
@@ -119,7 +119,7 @@ def get_domain_params(
     nodes_used = math.ceil(mpi_ranks_requested / num_procs_per_node)
     mpi_rank_utilisation = 100 * mpi_ranks_w_work / mpi_ranks_requested
     return {
-        ## AMReX params
+        ## BoxLib params
         "amr.max_level": 0,
         "amr.n_cell": f"{cells_per_sim_dim} {cells_per_sim_dim} {cells_per_sim_dim}",
         "amr.max_grid_size": cells_per_box_dim,
@@ -177,7 +177,9 @@ def get_sim_params(
     return sim_params
 
 
-def get_scheme_label(sim_params: dict) -> str:
+def get_scheme_label(
+    sim_params: dict,
+) -> str:
     emf_scheme = "fcvel" if EMF_SCHEME else "fs"
     emf_ave_scheme = sim_params["mhd.emf_averaging_method"].lower()
     spatial_order = "ro{}".format(sim_params["hydro.reconstruction_order"])
@@ -186,7 +188,9 @@ def get_scheme_label(sim_params: dict) -> str:
     return "_".join([emf_scheme, emf_ave_scheme, spatial_order, time_order, cfl])
 
 
-def get_domain_label(domain_params: dict[str, Any]) -> str:
+def get_domain_label(
+    domain_params: dict[str, Any],
+) -> str:
     cells_per_sim_dim = "N{}".format(domain_params["cells_per_sim_dim"])
     cells_per_box_dim = "Nbo{}".format(domain_params["cells_per_box_dim"])
     cells_per_block_dim = "Nbl{}".format(domain_params["cells_per_block_dim"])
@@ -208,7 +212,11 @@ def adjust_input_file(
     sim_params: dict[str, Any],
 ) -> None:
 
-    def _replace_or_add(_file_lines, _key, _value):
+    def _replace_or_add(
+        _file_lines,
+        _key,
+        _value,
+    ):
         for line_index, line_content in enumerate(_file_lines):
             if line_content.startswith("#"): continue
             if line_content.strip().startswith(f"{_key}"):
@@ -254,12 +262,12 @@ def setup_problem(
     target_problem_dir = SIM_DIR / "sims" / problem_name / scheme_label / domain_label
     io_manager.init_directory(target_problem_dir)
     ## save generated parameter files
-    json_files.save_dict_to_json_file(
+    json_io.save_dict_to_json_file(
         file_path=target_problem_dir / "domain_params.json",
         input_dict=domain_params,
         overwrite=True,
     )
-    json_files.save_dict_to_json_file(
+    json_io.save_dict_to_json_file(
         file_path=target_problem_dir / "sim_params.json",
         input_dict=sim_params,
         overwrite=True,
