@@ -7,9 +7,10 @@
 import numpy
 from pathlib import Path
 from dataclasses import dataclass
-from jormi.ww_types import type_manager
+from jormi.ww_types import type_checks
 from jormi.ww_plots import plot_manager, add_color
-from jormi.ww_fields import field_types
+from jormi.ww_fields import _cartesian_coordinates
+from jormi.ww_fields.fields_3d import field_type, domain_type
 from ww_quokka_sims.sim_io import load_dataset
 import utils
 
@@ -22,7 +23,7 @@ import utils
 class CompProfile:
     sim_time: float
     comp_label: str
-    axis_labels: list[field_types.AxisName]
+    axis_labels: list[_cartesian_coordinates.AxisLike]
     x_array_by_axis: list[numpy.ndarray]
     y_array_by_axis: list[numpy.ndarray]
 
@@ -56,8 +57,8 @@ class ComputeCompProfiles:
         dataset_dirs: list[Path],
         field_name: str,
         field_loader: str,
-        comps_to_plot: tuple[field_types.AxisName, ...],
-        axes_to_slice: tuple[field_types.AxisName, ...],
+        comps_to_plot: tuple[_cartesian_coordinates.AxisLike, ...],
+        axes_to_slice: tuple[_cartesian_coordinates.AxisLike, ...],
     ):
         self.dataset_dirs = dataset_dirs
         self.field_name = field_name
@@ -68,12 +69,12 @@ class ComputeCompProfiles:
     @staticmethod
     def _compute_cell_centers(
         *,
-        uniform_domain: field_types.UniformDomain,
-        axis_to_slice: field_types.AxisName,
+        udomain_3d: domain_type.UniformDomain_3D,
+        axis_to_slice: _cartesian_coordinates.AxisLike,
     ) -> numpy.ndarray:
-        (x_min, _), (y_min, _), (z_min, _) = uniform_domain.domain_bounds
-        num_cells_x, num_cells_y, num_cells_z = uniform_domain.resolution
-        cell_width_x, cell_width_y, cell_width_z = uniform_domain.cell_widths
+        (x_min, _), (y_min, _), (z_min, _) = udomain_3d.domain_bounds
+        num_cells_x, num_cells_y, num_cells_z = udomain_3d.resolution
+        cell_width_x, cell_width_y, cell_width_z = udomain_3d.cell_widths
         if axis_to_slice == "x": return x_min + (numpy.arange(num_cells_x) + 0.5) * cell_width_x
         if axis_to_slice == "y": return y_min + (numpy.arange(num_cells_y) + 0.5) * cell_width_y
         if axis_to_slice == "z": return z_min + (numpy.arange(num_cells_z) + 0.5) * cell_width_z
@@ -83,7 +84,7 @@ class ComputeCompProfiles:
     def _extract_1d_midplane_profile(
         *,
         data_3d: numpy.ndarray,
-        axis_to_slice: field_types.AxisName,
+        axis_to_slice: _cartesian_coordinates.AxisLike,
     ) -> numpy.ndarray:
         num_cells_x, num_cells_y, num_cells_z = data_3d.shape
         slice_index_x = num_cells_x // 2
@@ -97,10 +98,10 @@ class ComputeCompProfiles:
     @staticmethod
     def _get_sim_time(
         *,
-        field: field_types.ScalarField | field_types.VectorField,
+        field: field_type.ScalarField_3D | field_type.VectorField_3D,
     ) -> float:
         sim_time = field.sim_time
-        type_manager.ensure_finite_float(
+        type_checks.ensure_finite_float(
             param=sim_time,
             param_name="sim_time",
             allow_none=False,
@@ -111,21 +112,21 @@ class ComputeCompProfiles:
     def _compute_scalar_profiles(
         self,
         *,
-        field: field_types.ScalarField,
-        uniform_domain: field_types.UniformDomain,
+        field: field_type.ScalarField_3D,
+        udomain_3d: domain_type.UniformDomain_3D,
     ) -> list[CompProfile]:
-        field_types.ensure_sfield(field)
+        field_type.ensure_3d_sfield(field)
         sim_time = self._get_sim_time(field=field)
         axis_labels = list(self.axes_to_slice)
         x_array_by_axis: list[numpy.ndarray] = []
         y_array_by_axis: list[numpy.ndarray] = []
         for axis_to_slice in axis_labels:
             x_positions = ComputeCompProfiles._compute_cell_centers(
-                uniform_domain=uniform_domain,
+                udomain_3d=udomain_3d,
                 axis_to_slice=axis_to_slice,
             )
             field_profile = ComputeCompProfiles._extract_1d_midplane_profile(
-                data_3d=field.data,
+                data_3d=field.fdata.farray,
                 axis_to_slice=axis_to_slice,
             )
             x_array_by_axis.append(x_positions)
@@ -143,14 +144,14 @@ class ComputeCompProfiles:
     def _compute_vector_profiles(
         self,
         *,
-        field: field_types.VectorField,
-        uniform_domain: field_types.UniformDomain,
+        field: field_type.VectorField_3D,
+        udomain_3d: domain_type.UniformDomain_3D,
     ) -> list[CompProfile]:
         if len(self.comps_to_plot) == 0:
             raise ValueError(
                 f"Vector field `{self.field_name}` requires at least one component to plot; none provided.",
             )
-        field_types.ensure_vfield(field)
+        field_type.ensure_3d_vfield(field)
         sim_time = self._get_sim_time(field=field)
         comp_names = sorted(self.comps_to_plot)
         axis_labels = list(self.axes_to_slice)
@@ -161,10 +162,11 @@ class ComputeCompProfiles:
             y_array_by_axis: list[numpy.ndarray] = []
             for axis_to_slice in axis_labels:
                 x_positions = ComputeCompProfiles._compute_cell_centers(
-                    uniform_domain=uniform_domain,
+                    udomain_3d=udomain_3d,
                     axis_to_slice=axis_to_slice,
                 )
-                comp_data_3d = field.data[field_types.AXIS_NAME_TO_INDEX_VALUE[comp_name]]
+                comp_index = _cartesian_coordinates.get_axis_index(comp_name)
+                comp_data_3d = field.fdata.farray[comp_index]
                 comp_profile = ComputeCompProfiles._extract_1d_midplane_profile(
                     data_3d=comp_data_3d,
                     axis_to_slice=axis_to_slice,
@@ -188,18 +190,18 @@ class ComputeCompProfiles:
         comp_profiles_lookup: dict[str, list[CompProfile]] = {}
         for dataset_dir in self.dataset_dirs:
             with load_dataset.QuokkaDataset(dataset_dir=dataset_dir, verbose=False) as ds:
-                uniform_domain = ds.load_uniform_domain()
+                udomain_3d = ds.load_3d_uniform_domain()
                 loader_fn = getattr(ds, self.field_loader)
                 field = loader_fn()  # ScalarField or VectorField
-            if isinstance(field, field_types.ScalarField):
+            if isinstance(field, field_type.ScalarField_3D):
                 comp_profiles = self._compute_scalar_profiles(
                     field=field,
-                    uniform_domain=uniform_domain,
+                    udomain_3d=udomain_3d,
                 )
-            elif isinstance(field, field_types.VectorField):
+            elif isinstance(field, field_type.VectorField_3D):
                 comp_profiles = self._compute_vector_profiles(
                     field=field,
-                    uniform_domain=uniform_domain,
+                    udomain_3d=udomain_3d,
                 )
             else:
                 raise ValueError(f"{self.field_name} is an unrecognised field type.")
@@ -220,8 +222,8 @@ class RenderCompProfiles:
         *,
         dataset_dirs: list[Path],
         field_name: str,
-        comps_to_plot: tuple[field_types.AxisName, ...],
-        axes_to_slice: tuple[field_types.AxisName, ...],
+        comps_to_plot: tuple[_cartesian_coordinates.AxisLike, ...],
+        axes_to_slice: tuple[_cartesian_coordinates.AxisLike, ...],
         field_loader: str,
         cmap_name: str,
         fig_dir: Path,
@@ -239,7 +241,7 @@ class RenderCompProfiles:
         *,
         axs_grid,
         comp_labels: list[str],
-        axis_labels: list[field_types.AxisName],
+        axis_labels: list[_cartesian_coordinates.AxisLike],
     ) -> None:
         for row_index, comp_label in enumerate(comp_labels):
             for col_index, axis_label in enumerate(axis_labels):
@@ -268,12 +270,12 @@ class RenderCompProfiles:
     ) -> None:
         cmap, norm = add_color.create_cmap(
             cmap_name=self.cmap_name,
-            cmin=0.25,
-            vmin=0,
-            vmax=max(
+            min_cmap_value=0.25,
+            vmin=0.0,
+            vmax=float(max(
                 0,
                 len(comp_profiles) - 1,
-            ),
+            )),
         )
         for time_index, comp_profile in enumerate(comp_profiles):
             color = cmap(norm(time_index))
@@ -346,26 +348,26 @@ class ScriptInterface:
         input_dir: Path,
         dataset_tag: str,
         fields_to_plot: list[str],
-        comps_to_plot: tuple[field_types.AxisName, ...] | list[field_types.AxisName] | None,
-        axes_to_slice: tuple[field_types.AxisName, ...] | list[field_types.AxisName] | None,
+        comps_to_plot: tuple[_cartesian_coordinates.AxisLike, ...] | list[_cartesian_coordinates.AxisLike] | None,
+        axes_to_slice: tuple[_cartesian_coordinates.AxisLike, ...] | list[_cartesian_coordinates.AxisLike] | None,
     ):
-        type_manager.ensure_nonempty_string(param=dataset_tag, param_name="dataset_tag")
+        type_checks.ensure_nonempty_string(param=dataset_tag, param_name="dataset_tag")
         valid_fields = set(utils.QUOKKA_FIELD_LOOKUP.keys())
         if not fields_to_plot or not set(fields_to_plot).issubset(valid_fields):
             raise ValueError(f"Provide fields via -f from: {sorted(valid_fields)}")
         if comps_to_plot is None:
-            comps_to_plot = field_types.AXES_NAMES
-        elif not set(comps_to_plot).issubset(set(field_types.AXES_NAMES)):
+            comps_to_plot = _cartesian_coordinates.DEFAULT_AXES_ORDER
+        elif not set(comps_to_plot).issubset(set(_cartesian_coordinates.DEFAULT_AXES_ORDER)):
             raise ValueError("Provide one or more components (via -c) from: x, y, z")
         if axes_to_slice is None:
-            axes_to_slice = field_types.AXES_NAMES
-        elif not set(axes_to_slice).issubset(set(field_types.AXES_NAMES)):
+            axes_to_slice = _cartesian_coordinates.DEFAULT_AXES_ORDER
+        elif not set(axes_to_slice).issubset(set(_cartesian_coordinates.DEFAULT_AXES_ORDER)):
             raise ValueError("Provide one or more axes (via -a) from: x, y, z")
         self.input_dir = Path(input_dir)
         self.dataset_tag = dataset_tag
-        self.fields_to_plot = type_manager.as_tuple(param=fields_to_plot)
-        self.comps_to_plot = type_manager.as_tuple(param=comps_to_plot)
-        self.axes_to_slice = type_manager.as_tuple(param=axes_to_slice)
+        self.fields_to_plot = type_checks.as_tuple(param=fields_to_plot)
+        self.comps_to_plot = type_checks.as_tuple(param=comps_to_plot)
+        self.axes_to_slice = type_checks.as_tuple(param=axes_to_slice)
 
     def run(
         self,
