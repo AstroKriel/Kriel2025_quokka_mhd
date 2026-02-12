@@ -5,6 +5,8 @@
 ##
 
 import numpy
+import csv
+import re
 from pathlib import Path
 from dataclasses import dataclass
 from jormi.ww_types import type_checks
@@ -227,6 +229,7 @@ class RenderCompProfiles:
         field_loader: str,
         cmap_name: str,
         fig_dir: Path,
+        save_profiles: bool
     ):
         self.dataset_dirs = dataset_dirs
         self.fig_dir = Path(fig_dir)
@@ -235,6 +238,39 @@ class RenderCompProfiles:
         self.axes_to_slice = axes_to_slice
         self.field_loader = field_loader
         self.cmap_name = cmap_name
+        self.save_profiles = save_profiles
+
+    @staticmethod
+    def _safe_slug(
+            text: str
+        ) -> str:
+        text = text.strip()
+        text = re.sub(r"\s+", "_", text)
+        text = re.sub(r"[^A-Za-z0-9_\-\.]+", "", text)
+        return text if text else "profile"
+
+    def _save_comp_profiles_as_csvs(
+            self,
+            *,
+            comp_profiles_lookup: dict[str, list[CompProfile]],
+            out_dir: Path,
+        ) -> None:
+            out_dir = Path(out_dir)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            for comp_label, comp_profiles in comp_profiles_lookup.items():
+                comp_slug = self._safe_slug(comp_label)
+                for comp_profile in comp_profiles:
+                    t_str = f"{comp_profile.sim_time:.3f}"
+                    for axis_index, axis_label in enumerate(comp_profile.axis_labels):
+                        domain, values = comp_profile.get(axis_index=axis_index)
+                        # one file per (component, axis slice, time)
+                        file_name = f"{comp_slug}_ax={axis_label}_t={t_str}.csv"
+                        file_path = out_dir / file_name
+                        with file_path.open("w", newline="") as fp:
+                            writer = csv.writer(fp)
+                            writer.writerow(["domain", "values"])
+                            for position, value in zip(domain, values, strict=False):
+                                writer.writerow([float(position), float(value)])
 
     @staticmethod
     def _style_axs(
@@ -327,6 +363,11 @@ class RenderCompProfiles:
                     axs_row=axs_grid[row_index],
                     comp_profiles=comp_profiles,
                 )
+        if self.save_profiles:
+            self._save_comp_profiles_as_csvs(
+                comp_profiles_lookup=comp_profiles_lookup,
+                out_dir=self.fig_dir,
+            )
         RenderCompProfiles._style_axs(
             axs_grid=axs_grid,
             comp_labels=comp_labels,
@@ -350,6 +391,7 @@ class ScriptInterface:
         fields_to_plot: list[str],
         comps_to_plot: tuple[_cartesian_coordinates.AxisLike, ...] | list[_cartesian_coordinates.AxisLike] | None,
         axes_to_slice: tuple[_cartesian_coordinates.AxisLike, ...] | list[_cartesian_coordinates.AxisLike] | None,
+        save_profiles: bool,
     ):
         type_checks.ensure_nonempty_string(param=dataset_tag, param_name="dataset_tag")
         valid_fields = set(utils.QUOKKA_FIELD_LOOKUP.keys())
@@ -368,6 +410,7 @@ class ScriptInterface:
         self.fields_to_plot = type_checks.as_tuple(param=fields_to_plot)
         self.comps_to_plot = type_checks.as_tuple(param=comps_to_plot)
         self.axes_to_slice = type_checks.as_tuple(param=axes_to_slice)
+        self.save_profiles = save_profiles
 
     def run(
         self,
@@ -389,6 +432,7 @@ class ScriptInterface:
                 axes_to_slice=self.axes_to_slice,
                 field_loader=field_meta["loader"],
                 cmap_name=field_meta["cmap"],
+                save_profiles=self.save_profiles
             )
             render_comp_profiles.run()
 
@@ -406,6 +450,7 @@ def main():
         fields_to_plot=user_args.fields,
         comps_to_plot=user_args.comps,
         axes_to_slice=user_args.axes,
+        save_profiles=user_args.save,
     )
     script_interface.run()
 
