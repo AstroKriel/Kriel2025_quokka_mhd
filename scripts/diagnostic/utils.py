@@ -143,6 +143,13 @@ def get_user_args():
         default=False,
         help="Perform the relevant fitting routine (default: False).",
     )
+    parser.add_argument(
+        "--save",
+        "-s",
+        action="store_true",
+        default=False,
+        help="Save data (default: False).",
+    )
     user_args = parser.parse_args()
     return user_args
 
